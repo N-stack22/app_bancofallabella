@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Banco Falabella">
+  <rect width="48" height="48" rx="12" fill="#f7faf7"/>
+  <ellipse cx="21" cy="31" rx="18" ry="10" fill="#007a3d" transform="rotate(-10 21 31)"/>
+  <ellipse cx="25" cy="18" rx="14" ry="8" fill="#c7d900" transform="rotate(28 25 18)"/>
+  <ellipse cx="29" cy="25" rx="7" ry="4" fill="#005b2e" opacity=".55" transform="rotate(25 29 25)"/>
+</svg>
