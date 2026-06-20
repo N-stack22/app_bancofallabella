@@ -628,9 +628,10 @@ class CoreApiClient {
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
     }
+    final uri = _coreUri(url);
     final response = await _retryWhenConnectionRefused(
       () => http
-          .post(Uri.parse(url), headers: headers, body: body)
+          .post(uri, headers: headers, body: body)
           .timeout(const Duration(seconds: 25)),
     );
     _ensureOk(response.statusCode, response.body);
@@ -639,8 +640,9 @@ class CoreApiClient {
   }
 
   Future<dynamic> _getJson(String url) async {
+    final uri = _coreUri(url);
     final response = await _retryWhenConnectionRefused(
-      () => http.get(Uri.parse(url)).timeout(const Duration(seconds: 25)),
+      () => http.get(uri).timeout(const Duration(seconds: 25)),
     );
     _ensureOk(response.statusCode, response.body);
     if (response.body.trim().isEmpty) return <String, dynamic>{};
@@ -668,6 +670,16 @@ class CoreApiClient {
     return text.contains('connection refused') ||
         text.contains('errno = 111') ||
         text.contains('errno = 10061');
+  }
+
+  Uri _coreUri(String url) {
+    final uri = Uri.parse(url);
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        (uri.host == '127.0.0.1' || uri.host == 'localhost')) {
+      return uri.replace(host: '10.0.2.2');
+    }
+    return uri;
   }
 
   void _ensureOk(int statusCode, String body) {
