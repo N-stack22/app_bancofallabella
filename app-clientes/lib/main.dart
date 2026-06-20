@@ -628,21 +628,46 @@ class CoreApiClient {
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
     }
-    final response = await http
-        .post(Uri.parse(url), headers: headers, body: body)
-        .timeout(const Duration(seconds: 8));
+    final response = await _retryWhenConnectionRefused(
+      () => http
+          .post(Uri.parse(url), headers: headers, body: body)
+          .timeout(const Duration(seconds: 25)),
+    );
     _ensureOk(response.statusCode, response.body);
     if (response.body.trim().isEmpty) return <String, dynamic>{};
     return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
   }
 
   Future<dynamic> _getJson(String url) async {
-    final response = await http
-        .get(Uri.parse(url))
-        .timeout(const Duration(seconds: 8));
+    final response = await _retryWhenConnectionRefused(
+      () => http.get(Uri.parse(url)).timeout(const Duration(seconds: 25)),
+    );
     _ensureOk(response.statusCode, response.body);
     if (response.body.trim().isEmpty) return <String, dynamic>{};
     return jsonDecode(response.body);
+  }
+
+  Future<http.Response> _retryWhenConnectionRefused(
+    Future<http.Response> Function() request,
+  ) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await request();
+      } catch (error) {
+        lastError = error;
+        if (!_isConnectionRefused(error) || attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 450 * (attempt + 1)));
+      }
+    }
+    throw lastError ?? Exception('No se pudo conectar al Core');
+  }
+
+  bool _isConnectionRefused(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('connection refused') ||
+        text.contains('errno = 111') ||
+        text.contains('errno = 10061');
   }
 
   void _ensureOk(int statusCode, String body) {
