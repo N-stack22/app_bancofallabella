@@ -118,11 +118,16 @@ const androidCoreBaseUrl = String.fromEnvironment(
   'ANDROID_CORE_BASE_URL',
   defaultValue: 'http://10.0.2.2:8003',
 );
-const fallbackCoreBaseUrl = webCoreBaseUrl;
 String get primaryCoreBaseUrl {
   if (configuredCoreBaseUrl.isNotEmpty) return configuredCoreBaseUrl;
-  return kIsWeb ? webCoreBaseUrl : androidCoreBaseUrl;
+  if (kIsWeb) return webCoreBaseUrl;
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    return androidCoreBaseUrl;
+  }
+  return webCoreBaseUrl;
 }
+
+String get fallbackCoreBaseUrl => primaryCoreBaseUrl;
 
 final demoProfile = UserProfile(
   name: 'Nathalie Tatiana Rodriguez Rios',
