@@ -1,3 +1,5 @@
+import org.gradle.api.file.Directory
+
 allprojects {
     repositories {
         google()
@@ -5,15 +7,15 @@ allprojects {
     }
 }
 
-val newBuildDir =
+val newBuildDir: Directory =
     rootProject.layout.buildDirectory
         .dir("../../build")
         .get()
-rootProject.layout.buildDirectory.set(newBuildDir)
+rootProject.layout.buildDirectory.value(newBuildDir)
 
 subprojects {
-    val newSubprojectBuildDir = newBuildDir.dir(project.name)
-    project.layout.buildDirectory.set(newSubprojectBuildDir)
+    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
+    project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 subprojects {
     project.evaluationDependsOn(":app")
