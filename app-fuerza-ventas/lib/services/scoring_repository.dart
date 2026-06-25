@@ -10,13 +10,15 @@ const configuredCoreBaseUrl = String.fromEnvironment(
   'CORE_BASE_URL',
   defaultValue: '',
 );
+const productionCoreBaseUrl =
+    'https://n-stack22-sistemagestionacademica-production.up.railway.app';
 const webCoreBaseUrl = String.fromEnvironment(
   'WEB_CORE_BASE_URL',
-  defaultValue: 'http://127.0.0.1:8003',
+  defaultValue: productionCoreBaseUrl,
 );
 const androidCoreBaseUrl = String.fromEnvironment(
   'ANDROID_CORE_BASE_URL',
-  defaultValue: 'http://10.0.2.2:8003',
+  defaultValue: productionCoreBaseUrl,
 );
 const fallbackCoreBaseUrl = webCoreBaseUrl;
 

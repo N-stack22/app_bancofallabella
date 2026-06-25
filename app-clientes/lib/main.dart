@@ -106,17 +106,19 @@ const demoDni = '72028183';
 const demoEmail = 'nathalie.rodriguez@cliente.falabella.pe';
 const demoPassword = '12345';
 const secureStorage = FlutterSecureStorage();
+const productionCoreBaseUrl =
+    'https://n-stack22-sistemagestionacademica-production.up.railway.app';
 const configuredCoreBaseUrl = String.fromEnvironment(
   'CORE_BASE_URL',
   defaultValue: '',
 );
 const webCoreBaseUrl = String.fromEnvironment(
   'WEB_CORE_BASE_URL',
-  defaultValue: 'http://127.0.0.1:8003',
+  defaultValue: productionCoreBaseUrl,
 );
 const androidCoreBaseUrl = String.fromEnvironment(
   'ANDROID_CORE_BASE_URL',
-  defaultValue: 'http://10.0.2.2:8003',
+  defaultValue: productionCoreBaseUrl,
 );
 String get primaryCoreBaseUrl {
   if (configuredCoreBaseUrl.isNotEmpty) return configuredCoreBaseUrl;
