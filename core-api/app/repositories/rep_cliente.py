@@ -11,6 +11,8 @@ from app.models.mdl_cliente_mobile import (
     CrMovimiento, Tarjeta, OperacionCliente, Notificacion,
 )
 
+DEMO_CLIENTE_ID = "11111111-2222-4333-8444-555555555555"
+
 
 def get_usuario_by_username(db: Session, username: str) -> UsuarioCliente | None:
     return db.query(UsuarioCliente).filter(
@@ -163,6 +165,131 @@ def resumen_demo_por_documento(db: Session, numero_documento: str) -> dict | Non
             ),
             {"id": cliente_id},
         ).mappings().all()],
+    }
+
+
+def cliente_demo_dict(numero_documento: str = "72028183") -> dict:
+    """Cliente demo serializable para operar cuando Supabase aun no responde."""
+    return {
+        "id": DEMO_CLIENTE_ID,
+        "cod_cliente": f"CLI-{numero_documento[-4:]}",
+        "numero_documento": numero_documento,
+        "nombres": "Nathalie Tatiana",
+        "apellidos": "Rodriguez Rios",
+        "email": "nathalie.rodriguez@cliente.falabella.pe",
+        "telefono": "987654321",
+        "direccion": "Av. La Marina 1250, San Miguel",
+    }
+
+
+def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
+    """Resumen homebanking sin consultas SQL, usado como respaldo de Railway."""
+    now = datetime.now(timezone.utc)
+    cod_credito = f"CR-DEMO-{numero_documento[-4:]}"
+    return {
+        "cliente": cliente_demo_dict(numero_documento),
+        "cuentas": [
+            {
+                "id": "aaaaaaaa-1111-4222-8333-444444444444",
+                "cod_cuenta_ahorro": f"AHO-{numero_documento[-4:]}",
+                "tipo_cuenta": "Cuenta Ahorro Digital",
+                "moneda": "PEN",
+                "saldo_capital": 3450.70,
+                "saldo_interes": 12.50,
+                "tea": 2.50,
+                "estado": "activa",
+                "cci": f"002-0011{numero_documento[-4:]}7890123456-55",
+            }
+        ],
+        "creditos": [
+            {
+                "id": "bbbbbbbb-1111-4222-8333-444444444444",
+                "cod_cuenta_credito": cod_credito,
+                "producto": "Credito Empresarial Banco Falabella",
+                "monto_desembolsado": 8500.00,
+                "saldo_capital": 6840.00,
+                "saldo_total": 7420.00,
+                "dias_mora": 0,
+                "calificacion_interna": "NORMAL",
+                "estado": "vigente",
+                "fecha_desembolso": date.today().isoformat(),
+                "tea": 43.92,
+                "cuotas_total": 12,
+                "cuotas_pagadas": 3,
+            }
+        ],
+        "cronogramas": {
+            cod_credito: [
+                {
+                    "id": f"cccccccc-1111-4222-8333-44444444444{i}",
+                    "cod_cuenta_credito": cod_credito,
+                    "nro_cuota": i,
+                    "fecha_vencimiento": (date.today() + timedelta(days=30 * i)).isoformat(),
+                    "monto_cuota": 825.40,
+                    "monto_capital": 708.33,
+                    "monto_interes": 117.07,
+                    "saldo": max(8500 - (708.33 * i), 0),
+                    "estado_cuota": "pendiente" if i > 3 else "pagado",
+                    "fecha_pago": None if i > 3 else (date.today() - timedelta(days=30)).isoformat(),
+                }
+                for i in range(1, 13)
+            ]
+        },
+        "movimientos": [
+            {
+                "id": "dddddddd-1111-4222-8333-444444444441",
+                "cod_operacion": "OP-DEMO-001",
+                "cod_cuenta": f"AHO-{numero_documento[-4:]}",
+                "tipo": "CRE",
+                "concepto": "Desembolso credito empresarial",
+                "canal": "CORE",
+                "monto": 8500.00,
+                "moneda": "PEN",
+                "fecha_operacion": now.isoformat(),
+            },
+            {
+                "id": "dddddddd-1111-4222-8333-444444444442",
+                "cod_operacion": "OP-DEMO-002",
+                "cod_cuenta": f"AHO-{numero_documento[-4:]}",
+                "tipo": "DEB",
+                "concepto": "Pago tarjeta Falabella",
+                "canal": "APP",
+                "monto": 180.90,
+                "moneda": "PEN",
+                "fecha_operacion": (now - timedelta(days=1)).isoformat(),
+            },
+        ],
+        "tarjetas": [
+            {
+                "id": "eeeeeeee-1111-4222-8333-444444444444",
+                "numero_enmascarado": f"**** **** **** {numero_documento[-4:]}",
+                "marca": "Visa",
+                "linea_credito": 3500.00,
+                "saldo_utilizado": 420.00,
+                "fecha_corte": date.today().replace(day=20).isoformat(),
+                "fecha_pago": date.today().replace(day=28).isoformat(),
+                "estado": "activa",
+            }
+        ],
+        "notificaciones": [
+            {
+                "id": "ffffffff-1111-4222-8333-444444444444",
+                "titulo": "Credito desembolsado",
+                "cuerpo": "Tu credito empresarial esta activo en Banco Falabella.",
+                "tipo": "credito",
+                "leida": False,
+                "created_at": now.isoformat(),
+            }
+        ],
+        "solicitudes": [
+            {
+                "numero_expediente": "BF-DEMO-CLIENTE",
+                "monto_solicitado": 8500.00,
+                "monto_aprobado": 8500.00,
+                "estado": "desembolsado",
+                "created_at": now.isoformat(),
+            }
+        ],
     }
 
 
