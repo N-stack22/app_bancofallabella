@@ -900,12 +900,42 @@ class ScoringRepository {
     required String purpose,
     required String signature,
   }) async {
+    final factor = paymentFactor(0.60, term);
+    if (_text(client.assignment, 'source') == 'core') {
+      await _postCore('/cliente/solicitudes', {
+        'numero_documento': _text(client.profile, 'dni', fallback: '00000000'),
+        'nombres': _text(client.profile, 'nombres', fallback: 'Cliente'),
+        'apellidos': _text(
+          client.profile,
+          'apellidos',
+          fallback: 'Banco Falabella',
+        ),
+        'telefono': _text(client.profile, 'telefono', fallback: '999000000'),
+        'tipo_negocio': client.business,
+        'nombre_negocio': _text(client.profile, 'nombre_negocio'),
+        'ingresos_estimados': _number(
+          client.score,
+          'ingreso_promedio_ref',
+          fallback: 3000,
+        ),
+        'monto_solicitado': amount,
+        'plazo_meses': term,
+        'moneda': 'PEN',
+        'tipo_cuota': 'mensual',
+        'garantia': 'sin_garantia',
+        'destino_credito': purpose,
+        'cuota_estimada': amount * factor,
+        'tea_referencial': 0.60,
+        'firma_cliente_base64': signature,
+      });
+      return;
+    }
+
     if (!SupabaseConfig.isConfigured) return;
     final supabase = Supabase.instance.client;
     final now = DateTime.now();
     final expediente =
         'BF-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.millisecondsSinceEpoch.toString().substring(8)}';
-    final factor = paymentFactor(0.60, term);
     await supabase.from('solicitudes_credito').insert({
       'numero_expediente': expediente,
       'asesor_id': _number(advisor, 'id').toInt() == 0

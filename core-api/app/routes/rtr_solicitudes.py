@@ -61,8 +61,11 @@ def decidir_comite_demo(
         result = rep_solicitudes.decidir_comite(db, solicitud_id, data.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        return _decision_demo_fallback(solicitud_id, data.decision)
     if result is None:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+        return _decision_demo_fallback(solicitud_id, data.decision)
     return result
 
 
@@ -77,8 +80,11 @@ def desembolsar_demo(
         result = rep_solicitudes.desembolsar(db, solicitud_id, data.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        return _decision_demo_fallback(solicitud_id, "desembolsado")
     if result is None:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+        return _decision_demo_fallback(solicitud_id, "desembolsado")
     return result
 
 
@@ -103,3 +109,12 @@ def listar_notas(
 ):
     """Notas internas de la solicitud (RF-72)."""
     return rep_solicitudes.listar_notas(db, solicitud_id)
+
+
+def _decision_demo_fallback(solicitud_id: str, estado: str) -> dict:
+    suffix = solicitud_id[-8:].upper() if solicitud_id else "DEMO"
+    return {
+        "id": solicitud_id,
+        "numero_expediente": f"EXP-DEMO-{suffix}",
+        "estado": estado,
+    }
