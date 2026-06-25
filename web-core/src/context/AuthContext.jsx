@@ -5,14 +5,8 @@ import * as authService from '../services/authService.js'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const demoUser = {
-    nombre: 'Nathalie Tatiana Rodriguez Rios',
-    nombres: 'Nathalie Tatiana',
-    codigo_empleado: 'BF-CORE',
-    perfil: 'Operador',
-  }
-  const [token, setToken] = useState(() => authService.getStoredToken() || 'demo-falabella')
-  const [user, setUser] = useState(() => authService.getStoredUser() || demoUser)
+  const [token, setToken] = useState(() => authService.getStoredToken())
+  const [user, setUser] = useState(() => authService.getStoredUser())
 
   const login = useCallback(async (codigoEmpleado, password) => {
     const { token: newToken, user: newUser } = await authService.login(codigoEmpleado, password)
@@ -24,15 +18,15 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     authService.clearSession()
-    setToken('demo-falabella')
-    setUser(demoUser)
+    setToken(null)
+    setUser(null)
   }, [])
 
   const value = useMemo(
     () => ({
       user,
       token,
-      isAuthenticated: Boolean(token),
+      isAuthenticated: Boolean(token && user),
       login,
       logout,
     }),

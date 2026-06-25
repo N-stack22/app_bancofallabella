@@ -1,38 +1,14 @@
-import api, { cachedGet, invalidateApiCache, isDemoSession } from './api.js'
+import api, { cachedGet, invalidateApiCache } from './api.js'
 
 /** Cartera del día del asesor autenticado. GET /cartera?fecha=YYYY-MM-DD */
 export async function listarCartera(fecha) {
   const params = fecha ? { fecha } : {}
-  if (isDemoSession()) {
-    try {
-      return await cachedGet('/cartera/demo', { params }, 45000)
-    } catch (_) {
-      return []
-    }
-  }
-  try {
-    return await cachedGet('/cartera', { params }, 45000)
-  } catch (_) {
-    try {
-      return await cachedGet('/cartera/demo', { params }, 45000)
-    } catch (_) {
-      return []
-    }
-  }
+  return cachedGet('/cartera', { params }, 45000)
 }
 
 /** Registra el resultado de una visita. POST /cartera/{id}/visita */
 export async function marcarVisita(carteraId, payload) {
-  try {
-    const endpoint = isDemoSession()
-      ? `/cartera/demo/${carteraId}/visita`
-      : `/cartera/${carteraId}/visita`
-    const { data } = await api.post(endpoint, payload)
-    invalidateApiCache('/cartera')
-    return data
-  } catch (_) {
-    const { data } = await api.post(`/cartera/demo/${carteraId}/visita`, payload)
-    invalidateApiCache('/cartera')
-    return data
-  }
+  const { data } = await api.post(`/cartera/${carteraId}/visita`, payload)
+  invalidateApiCache('/cartera')
+  return data
 }

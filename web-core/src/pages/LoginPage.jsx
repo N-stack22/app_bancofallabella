@@ -164,7 +164,7 @@ export default function LoginPage() {
           <div className="cm-auth-hint">
             <BadgeCheck size={15} />
             <span>
-              Demo: codigo <strong>0001</strong> - clave <strong>1234</strong>
+              Usa el codigo y clave asignados en el Core operativo.
             </span>
           </div>
         </div>

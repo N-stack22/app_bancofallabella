@@ -53,8 +53,17 @@ class PreapprovedClient {
   final Map<String, dynamic> fieldFile;
   final Map<String, dynamic> assignment;
 
-  String get id => _text(credit, 'id');
-  String get userId => _text(credit, 'user_id');
+  String get id =>
+      _text(credit, 'id', fallback: _text(assignment, 'id', fallback: userId));
+  String get userId => _text(
+    credit,
+    'user_id',
+    fallback: _text(
+      credit,
+      'cliente_id',
+      fallback: _text(profile, 'id', fallback: _text(assignment, 'cliente_id')),
+    ),
+  );
   String get fullName {
     final name = _text(profile, 'nombres');
     final lastName = _text(profile, 'apellidos');
@@ -64,13 +73,21 @@ class PreapprovedClient {
   }
 
   String get business => _text(profile, 'tipo_negocio', fallback: 'Negocio');
-  String get district => _text(profile, 'distrito', fallback: 'Sin distrito');
+  String get district => _text(
+    profile,
+    'distrito',
+    fallback: _text(profile, 'direccion', fallback: 'Sin zona'),
+  );
   String get segment => _text(
     credit,
     'segmento',
     fallback: _text(score, 'segmento_preliminar', fallback: 'PENDIENTE'),
   );
-  String get status => _text(credit, 'estado', fallback: 'preaprobado');
+  String get status => _text(
+    credit,
+    'estado',
+    fallback: credit['vigente'] == false ? 'vencido' : 'preaprobado',
+  );
   String get visitStatus => _text(
     assignment,
     'estado_visita',
@@ -100,8 +117,11 @@ class PreapprovedClient {
     'monto_hipotesis',
     fallback: _number(score, 'monto_hipotesis'),
   );
-  num get approvedAmount =>
-      _number(credit, 'monto_aprobado', fallback: hypothesisAmount);
+  num get approvedAmount => _number(
+    credit,
+    'monto_aprobado',
+    fallback: _number(credit, 'monto_maximo', fallback: hypothesisAmount),
+  );
   num get lat => _number(profile, 'lat_negocio');
   num get lng => _number(profile, 'lng_negocio');
   bool get isRouteReferenceDestination => userId.startsWith('ruta-');
@@ -127,7 +147,11 @@ class PreapprovedClient {
   }
 
   String get maskedDocument {
-    final dni = _text(profile, 'dni', fallback: '00000000');
+    final dni = _text(
+      profile,
+      'dni',
+      fallback: _text(profile, 'numero_documento', fallback: '00000000'),
+    );
     if (dni.length <= 3) return '***';
     return '***${dni.substring(dni.length - 3)}';
   }
@@ -157,6 +181,22 @@ class PreapprovedClient {
     if (segment == 'ESTANDAR') return 52;
     return 35;
   }
+}
+
+class _PortfolioBundle {
+  const _PortfolioBundle({
+    required this.clients,
+    required this.assignments,
+    required this.coreCredits,
+    required this.clientsById,
+    required this.preapprovalsByClientId,
+  });
+
+  final List<PreapprovedClient> clients;
+  final List<Map<String, dynamic>> assignments;
+  final List<Map<String, dynamic>> coreCredits;
+  final Map<String, Map<String, dynamic>> clientsById;
+  final Map<String, Map<String, dynamic>> preapprovalsByClientId;
 }
 
 class FieldScoringInput {
@@ -401,134 +441,72 @@ class ScoringRepository {
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        client
-            .from('creditos_preaprobados')
-            .select()
-            .order('score_final', ascending: false)
-            .limit(30),
-        client.from('vw_pbi_agencias').select().limit(8),
-        client.from('vw_pbi_asesores').select().limit(12),
-        client.from('vw_pbi_kpis_piloto').select().limit(8),
-        client.from('vw_pbi_fichas_campo').select().limit(12),
+      final baseRows = await Future.wait<dynamic>([
+        client.from('agencias').select().limit(50),
+        client.from('asesores').select().limit(250),
       ]);
-
-      final credits = _asList(results[0]);
-
-      final userIds = credits
-          .map((item) => _text(item, 'user_id'))
-          .where((id) => id.isNotEmpty)
-          .toSet()
-          .toList();
-      final scoreIds = credits
-          .map((item) => _text(item, 'score_id'))
-          .where((id) => id.isNotEmpty)
-          .toSet()
-          .toList();
-
-      final related = await Future.wait<dynamic>([
-        userIds.isEmpty
-            ? Future.value(<Map<String, dynamic>>[])
-            : client
-                  .from('perfiles_clientes')
-                  .select()
-                  .inFilter('user_id', userIds),
-        scoreIds.isEmpty
-            ? Future.value(<Map<String, dynamic>>[])
-            : client
-                  .from('scores_transaccionales')
-                  .select()
-                  .inFilter('id', scoreIds),
-        userIds.isEmpty
-            ? Future.value(<Map<String, dynamic>>[])
-            : client
-                  .from('fichas_campo')
-                  .select()
-                  .inFilter('user_id', userIds)
-                  .order('fecha_visita', ascending: false),
-      ]);
-
-      final profiles = _indexBy(_asList(related[0]), 'user_id');
-      final scores = _indexBy(_asList(related[1]), 'id');
-      final fieldFiles = _latestByUser(_asList(related[2]));
-      final assignments = _indexBy(
-        await _optionalList(
-          client
-              .from('cartera_diaria')
-              .select()
-              .inFilter('cliente_user_id', userIds)
-              .order('score_prioridad', ascending: false),
-        ),
-        'cliente_user_id',
+      final rawAgencies = _asList(baseRows[0]);
+      final rawAdvisors = _asList(baseRows[1]);
+      final agencyById = _indexBy(rawAgencies, 'id');
+      final advisor = _advisorForSession(
+        email: client.auth.currentUser?.email,
+        advisors: rawAdvisors,
+        agenciesById: agencyById,
       );
-      final portfolio = credits
-          .map(
-            (credit) => PreapprovedClient(
-              credit: credit,
-              profile: profiles[_text(credit, 'user_id')] ?? const {},
-              score: scores[_text(credit, 'score_id')] ?? const {},
-              fieldFile: fieldFiles[_text(credit, 'user_id')] ?? const {},
-              assignment: assignments[_text(credit, 'user_id')] ?? const {},
-            ),
-          )
-          .toList();
-      portfolio.sort((a, b) => b.priorityScore.compareTo(a.priorityScore));
+      final advisorId = _text(advisor, 'id');
 
-      final requests = await _optionalList(
+      final portfolioBundle = await _loadPortfolioFromCoreSchema(
+        supabase: client,
+        advisorId: advisorId,
+      );
+      final portfolio = portfolioBundle.clients;
+
+      final rows = await Future.wait<dynamic>([
         client
             .from('solicitudes_credito')
             .select()
             .order('created_at', ascending: false)
             .limit(20),
-      );
-      final bureau = await _optionalList(
         client
             .from('consultas_buro')
             .select()
             .order('created_at', ascending: false)
             .limit(20),
-      );
-      final alerts = await _optionalList(
         client
             .from('alertas_cartera')
             .select()
             .order('created_at', ascending: false)
             .limit(20),
-      );
-      final collections = await _optionalList(
         client
             .from('acciones_cobranza')
             .select()
             .order('timestamp_gestion', ascending: false)
             .limit(20),
-      );
-      final roleRows = await _optionalList(
-        client.from('fv_usuarios_perfiles').select().limit(1),
-      );
-      final pendingRows = await _optionalList(
-        client
-            .from('fv_sync_queue')
-            .select()
-            .eq('estado', 'pendiente')
-            .limit(50),
-      );
+        client.from('sync_outbox').select().eq('estado', 'pendiente').limit(50),
+      ]);
+      final requests = _asList(rows[0]);
+      final bureau = _asList(rows[1]);
+      final alerts = _asList(rows[2]);
+      final collections = _asList(rows[3]);
+      final pendingRows = _asList(rows[4]);
 
       return remember(
         SalesDashboardData(
-          advisor: {
-            ..._advisorFromSession(client.auth.currentUser?.email),
-            'perfil': roleRows.isEmpty
-                ? 'Operador'
-                : _text(roleRows.first, 'perfil', fallback: 'Operador'),
-            'id': roleRows.isEmpty
-                ? 1
-                : _number(roleRows.first, 'asesor_id', fallback: 1).toInt(),
-          },
+          advisor: advisor,
           portfolio: portfolio,
-          agencies: _asList(results[1]),
-          advisors: _asList(results[2]),
-          kpis: _asList(results[3]),
-          history: _asList(results[4]),
+          agencies: _normalisedAgencies(rawAgencies, rawAdvisors),
+          advisors: _normalisedAdvisors(rawAdvisors, agencyById),
+          kpis: _buildKpis(
+            agencies: rawAgencies,
+            assignments: portfolioBundle.assignments,
+            requests: requests,
+            credits: portfolioBundle.coreCredits,
+          ),
+          history: _historyFromAssignments(
+            assignments: portfolioBundle.assignments,
+            clientsById: portfolioBundle.clientsById,
+            preapprovalsByClientId: portfolioBundle.preapprovalsByClientId,
+          ),
           requests: requests,
           bureau: bureau,
           alerts: alerts,
@@ -537,9 +515,7 @@ class ScoringRepository {
               pendingRows.length +
               requests.where((item) => item['pendiente_sync'] == true).length,
           lastSyncLabel: 'hoy ${_timeLabel(DateTime.now())}',
-          role: roleRows.isEmpty
-              ? 'Operador'
-              : _text(roleRows.first, 'perfil', fallback: 'Operador'),
+          role: _text(advisor, 'perfil', fallback: 'Operador'),
           online: true,
         ),
       );
@@ -558,74 +534,38 @@ class ScoringRepository {
     if (!SupabaseConfig.isConfigured) return;
 
     final supabase = Supabase.instance.client;
-    final today = DateTime.now().toIso8601String().substring(0, 10);
     final estadoCredito = result.disqualified
         ? 'rechazado'
         : 'visita_realizada';
-    final ventasMensuales = switch (input.ventasDiariasRango) {
-      'mas_300' => 10500,
-      '151_a_300' => 5720,
-      '50_a_150' => 2700,
-      _ => 1200,
-    };
-    final gastos = switch (input.ratioGastos) {
-      'menos_50pct' => ventasMensuales * 0.42,
-      '50_a_80pct' => ventasMensuales * 0.65,
-      _ => ventasMensuales * 0.88,
-    };
 
-    await supabase.from('fichas_campo').insert({
-      'user_id': client.userId,
-      'score_id': _text(client.credit, 'score_id').isEmpty
-          ? null
-          : _text(client.credit, 'score_id'),
-      'asesor_nombre': advisorName,
-      'agencia': agency,
-      'fecha_visita': today,
-      'hora_inicio': '09:00',
-      'hora_fin': '09:45',
-      'negocio_verificado': input.negocioVerificado,
-      'motivo_no_verificado': result.disqualified ? result.reason : null,
-      'antiguedad_negocio': input.antiguedadNegocio,
-      'pts_antiguedad': result.ptsAntiguedad,
-      'tenencia_local': input.tenenciaLocal,
-      'pts_tenencia': result.ptsTenencia,
-      'direccion_verificada': _text(client.profile, 'direccion_negocio'),
-      'ventas_diarias_rango': input.ventasDiariasRango,
-      'pts_ventas': result.ptsVentas,
-      'ventas_mensuales_est': ventasMensuales,
-      'gastos_fijos_mes': gastos,
-      'ratio_gastos': input.ratioGastos,
-      'pts_gastos': result.ptsGastos,
-      'ingreso_consistente': true,
-      'tiene_deuda_informal': input.tieneDeudaInformal,
-      'pts_deuda_informal': result.ptsDeuda,
-      'monto_deuda_informal': input.tieneDeudaInformal == 'no' ? 0 : 600,
-      'participa_pandero': input.participaPandero,
-      'pts_pandero': result.ptsPandero,
-      'stock_visible': input.stockVisible,
-      'pts_stock': result.ptsStock,
-      'activos_hogar': input.activosHogar,
-      'pts_activos': result.ptsActivos,
-      'caracter_resultado': input.caracterResultado,
-      'obs_caracter': input.observaciones,
-      'score_transaccional_ref': client.scoreValue.toInt(),
-      'monto_aprobado_propuesto': result.disqualified
-          ? 0
-          : min(input.montoPropuesto.toDouble(), result.maxAmount),
-      'plazo_propuesto_meses': input.plazoMeses,
-      'cuota_estimada': result.payment,
-      'recomendacion_asesor': result.disqualified
-          ? 'rechazar'
-          : input.recomendacion,
-      'obs_finales': input.observaciones,
-      'estado_ficha': 'completada',
-    });
+    final assignmentId = _text(client.assignment, 'id');
+    if (assignmentId.isNotEmpty) {
+      await supabase
+          .from('cartera_diaria')
+          .update({
+            'estado_visita': result.disqualified ? 'no_encontrado' : 'visitado',
+            'resultado_visita': estadoCredito,
+            'observacion_visita':
+                '$advisorName - $agency - ${input.recomendacion}: ${input.observaciones}',
+            'timestamp_visita': DateTime.now().toIso8601String(),
+            'lat_visita': client.lat,
+            'lng_visita': client.lng,
+          })
+          .eq('id', assignmentId);
+    }
 
-    await supabase
-        .from('creditos_preaprobados')
-        .update({'estado': estadoCredito, 'fecha_visita': today})
-        .eq('id', client.id);
+    try {
+      await supabase
+          .from('creditos_preaprobados')
+          .update({
+            'score_confianza': (result.scoreFinal / 8).clamp(0, 100).round(),
+            'monto_maximo': result.disqualified ? 0 : result.maxAmount,
+            'plazo_sugerido_meses': result.suggestedTerm,
+          })
+          .eq('id', client.id);
+    } catch (_) {
+      // El cliente puede venir solo desde cartera_diaria sin preaprobado.
+    }
   }
 
   Future<bool> updateBusinessLocation({
@@ -640,16 +580,16 @@ class ScoringRepository {
     final supabase = Supabase.instance.client;
 
     await supabase
-        .from('perfiles_clientes')
+        .from('clientes')
         .update({
-          'lat_negocio': latitude,
-          'lng_negocio': longitude,
-          'direccion_negocio': address.isEmpty
+          'lat': latitude,
+          'lng': longitude,
+          'direccion': address.isEmpty
               ? _text(client.profile, 'direccion_negocio')
               : address,
           'updated_at': DateTime.now().toIso8601String(),
         })
-        .eq('user_id', client.userId);
+        .eq('id', client.userId);
     return true;
   }
 
@@ -672,7 +612,6 @@ class ScoringRepository {
           'timestamp_visita': DateTime.now().toIso8601String(),
           'lat_visita': client.lat,
           'lng_visita': client.lng,
-          'updated_at': DateTime.now().toIso8601String(),
         })
         .eq('id', assignmentId);
   }
@@ -691,14 +630,19 @@ class ScoringRepository {
     final now = DateTime.now();
     final expediente =
         'BF-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.millisecondsSinceEpoch.toString().substring(8)}';
+    final advisorId = _text(advisor, 'id');
+    if (advisorId.isEmpty || client.userId.isEmpty) {
+      throw StateError('No se encontro asesor o cliente valido en Supabase.');
+    }
     await supabase.from('solicitudes_credito').insert({
       'numero_expediente': expediente,
-      'asesor_id': _number(advisor, 'id').toInt() == 0
-          ? null
-          : _number(advisor, 'id').toInt(),
-      'cliente_user_id': client.userId,
+      'asesor_id': advisorId,
+      'cliente_id': client.userId,
+      'agencia_id': _nullableText(_text(client.assignment, 'agencia_id')),
+      'canal': 'asesor',
       'tipo_negocio': client.business,
       'nombre_negocio': _text(client.profile, 'nombre_negocio'),
+      'actividad_economica': client.business,
       'antiguedad_negocio_meses': _number(
         client.profile,
         'antiguedad_negocio_meses',
@@ -718,6 +662,7 @@ class ScoringRepository {
       'firma_cliente_base64': signature,
       'lat_captura': client.lat,
       'lng_captura': client.lng,
+      'pendiente_sync': true,
     });
   }
 
@@ -749,12 +694,23 @@ class ScoringRepository {
     final url = supabase.storage
         .from(SupabaseConfig.documentsBucket)
         .getPublicUrl(path);
-    await supabase.from('solicitudes_documentos').insert({
-      'tipo_documento': type,
-      'storage_url': url,
-      'tamanio_kb': (bytes.length / 1024).round(),
-      'nitidez_score': min(100, bytes.length / 2048),
-    });
+    final requests = await _optionalList(
+      supabase
+          .from('solicitudes_credito')
+          .select('id')
+          .eq('cliente_id', client.userId)
+          .order('created_at', ascending: false)
+          .limit(1),
+    );
+    if (requests.isNotEmpty) {
+      await supabase.from('solicitudes_documentos').insert({
+        'solicitud_id': _text(requests.first, 'id'),
+        'tipo_documento': type,
+        'storage_url': url,
+        'tamanio_kb': (bytes.length / 1024).round(),
+        'nitidez_score': min(100, bytes.length / 2048),
+      });
+    }
     return url;
   }
 
@@ -779,10 +735,21 @@ class ScoringRepository {
     final url = supabase.storage
         .from(SupabaseConfig.documentsBucket)
         .getPublicUrl(path);
-    await supabase.from('fv_pdfs_generados').insert({
-      'numero_expediente': expediente,
-      'storage_url': url,
-    });
+    final requests = await _optionalList(
+      supabase
+          .from('solicitudes_credito')
+          .select('id')
+          .eq('numero_expediente', expediente)
+          .limit(1),
+    );
+    if (requests.isNotEmpty) {
+      await supabase.from('sync_outbox').insert({
+        'entidad': 'pdf_expediente',
+        'entidad_id': _text(requests.first, 'id'),
+        'operacion': 'create',
+        'payload': {'numero_expediente': expediente, 'storage_url': url},
+      });
+    }
   }
 
   Future<void> signOut() async {
@@ -791,26 +758,474 @@ class ScoringRepository {
     }
   }
 
+  Future<_PortfolioBundle> _loadPortfolioFromCoreSchema({
+    required SupabaseClient supabase,
+    required String advisorId,
+  }) async {
+    final assignments = await _optionalList(
+      advisorId.isEmpty
+          ? supabase
+                .from('cartera_diaria')
+                .select()
+                .order('score_prioridad', ascending: false)
+                .limit(50)
+          : supabase
+                .from('cartera_diaria')
+                .select()
+                .eq('asesor_id', advisorId)
+                .order('score_prioridad', ascending: false)
+                .limit(50),
+    );
+    final assignedClientIds = _ids(assignments, 'cliente_id');
+    final preapprovals = await _optionalList(
+      assignedClientIds.isNotEmpty
+          ? supabase
+                .from('creditos_preaprobados')
+                .select()
+                .inFilter('cliente_id', assignedClientIds)
+                .order('created_at', ascending: false)
+                .limit(80)
+          : advisorId.isEmpty
+          ? supabase
+                .from('creditos_preaprobados')
+                .select()
+                .order('created_at', ascending: false)
+                .limit(80)
+          : supabase
+                .from('creditos_preaprobados')
+                .select()
+                .eq('asesor_id', advisorId)
+                .order('created_at', ascending: false)
+                .limit(80),
+    );
+    final preapprovedClientIds = _ids(preapprovals, 'cliente_id');
+    final clientIds = {...assignedClientIds, ...preapprovedClientIds}.toList();
+
+    final relatedRows = await Future.wait<dynamic>([
+      clientIds.isEmpty
+          ? Future.value(<Map<String, dynamic>>[])
+          : supabase.from('clientes').select().inFilter('id', clientIds),
+      clientIds.isEmpty
+          ? Future.value(<Map<String, dynamic>>[])
+          : supabase
+                .from('cr_creditos')
+                .select()
+                .inFilter('cliente_id', clientIds)
+                .order('sync_at', ascending: false),
+    ]);
+
+    final clientsById = _indexBy(_asList(relatedRows[0]), 'id');
+    final coreCredits = _asList(relatedRows[1]);
+    final preapprovalsByClientId = _latestByKey(preapprovals, 'cliente_id');
+    final coreCreditsByClientId = _latestByKey(coreCredits, 'cliente_id');
+    final assignmentByClientId = _latestByKey(assignments, 'cliente_id');
+    final portfolioClientIds =
+        (assignments.isNotEmpty ? assignedClientIds : clientIds)
+            .where((id) => id.isNotEmpty)
+            .toSet()
+            .toList();
+
+    final clients = portfolioClientIds.map((clientId) {
+      final assignment = assignmentByClientId[clientId] ?? const {};
+      final rawClient = clientsById[clientId] ?? const {};
+      final preapproval = preapprovalsByClientId[clientId] ?? const {};
+      final coreCredit = coreCreditsByClientId[clientId] ?? const {};
+      return PreapprovedClient(
+        credit: _creditFromCoreSchema(
+          clientId: clientId,
+          preapproval: preapproval,
+          assignment: assignment,
+          coreCredit: coreCredit,
+        ),
+        profile: _profileFromCoreSchema(rawClient),
+        score: _scoreFromCoreSchema(
+          preapproval: preapproval,
+          assignment: assignment,
+          rawClient: rawClient,
+        ),
+        fieldFile: _fieldFileFromAssignment(assignment, preapproval),
+        assignment: assignment,
+      );
+    }).toList();
+    clients.sort((a, b) => b.priorityScore.compareTo(a.priorityScore));
+
+    return _PortfolioBundle(
+      clients: clients,
+      assignments: assignments,
+      coreCredits: coreCredits,
+      clientsById: clientsById,
+      preapprovalsByClientId: preapprovalsByClientId,
+    );
+  }
+
   static double paymentFactor(double tea, int months) {
     if (months <= 0) return 0;
     final tem = pow(1 + tea, 1 / 12) - 1;
     return tem * pow(1 + tem, months) / (pow(1 + tem, months) - 1);
   }
 
-  static Map<String, dynamic> _advisorFromSession(String? email) => {
-    'id': 1,
-    'nombre_completo': 'Carlos Ramirez',
-    'email': email ?? 'asesor0001@bancofalabella.local',
-    'agencia': 'Agencia Huancayo Centro',
-    'nivel': 'Senior II',
-    'codigo': 'AG-001-01',
-  };
+  static Map<String, dynamic> _advisorForSession({
+    required String? email,
+    required List<Map<String, dynamic>> advisors,
+    required Map<String, Map<String, dynamic>> agenciesById,
+  }) {
+    final code = _advisorCodeFromEmail(email);
+    Map<String, dynamic> row = const {};
+    if (code.isNotEmpty) {
+      for (final advisor in advisors) {
+        if (_matchesAdvisorCode(advisor, code)) {
+          row = advisor;
+          break;
+        }
+      }
+    }
+    if (row.isEmpty && advisors.isNotEmpty) row = advisors.first;
+    final agency = agenciesById[_text(row, 'agencia_id')] ?? const {};
+    return _advisorFromCoreSchema(row: row, agency: agency, email: email);
+  }
+
+  static Map<String, dynamic> _advisorFromCoreSchema({
+    required Map<String, dynamic> row,
+    required Map<String, dynamic> agency,
+    required String? email,
+  }) {
+    final fullName = '${_text(row, 'nombres')} ${_text(row, 'apellidos')}'
+        .trim();
+    final code = _text(
+      row,
+      'codigo_empleado',
+      fallback: _text(
+        row,
+        'cod_asesor',
+        fallback: _advisorCodeFromEmail(email),
+      ),
+    );
+    return {
+      'id': _text(row, 'id'),
+      'nombre_completo': fullName.isEmpty ? 'Asesor Banco Falabella' : fullName,
+      'email':
+          email ?? (code.isEmpty ? '' : 'asesor$code@bancofalabella.local'),
+      'agencia': _text(agency, 'nombre', fallback: 'Agencia asignada'),
+      'nivel': _prettyProfile(_text(row, 'perfil', fallback: 'operador')),
+      'perfil': _prettyProfile(_text(row, 'perfil', fallback: 'operador')),
+      'codigo': code.isEmpty ? 'ASESOR' : code,
+    };
+  }
+
+  static bool _matchesAdvisorCode(Map<String, dynamic> advisor, String code) {
+    final expected = _normaliseAdvisorCode(code);
+    final candidates = [
+      _text(advisor, 'codigo_empleado'),
+      _text(advisor, 'cod_asesor'),
+    ];
+    return candidates.any((candidate) {
+      final normalised = _normaliseAdvisorCode(candidate);
+      return normalised == expected ||
+          normalised.endsWith(expected) ||
+          expected.endsWith(normalised);
+    });
+  }
+
+  static String _advisorCodeFromEmail(String? email) {
+    final local = (email ?? '').split('@').first.toLowerCase();
+    final digits = local.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return '';
+    return digits.padLeft(4, '0');
+  }
+
+  static String _normaliseAdvisorCode(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.isEmpty ? value.trim().toLowerCase() : digits.padLeft(4, '0');
+  }
+
+  static String _prettyProfile(String value) {
+    final text = value.replaceAll('_', ' ').trim();
+    if (text.isEmpty) return 'Operador';
+    return text
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+  }
+
+  static Map<String, dynamic> _profileFromCoreSchema(Map<String, dynamic> row) {
+    return {
+      ...row,
+      'user_id': _text(row, 'id'),
+      'dni': _text(row, 'numero_documento'),
+      'direccion_negocio': _text(row, 'direccion'),
+      'lat_negocio': _number(row, 'lat'),
+      'lng_negocio': _number(row, 'lng'),
+      'distrito': _text(row, 'direccion', fallback: 'Sin zona'),
+    };
+  }
+
+  static Map<String, dynamic> _creditFromCoreSchema({
+    required String clientId,
+    required Map<String, dynamic> preapproval,
+    required Map<String, dynamic> assignment,
+    required Map<String, dynamic> coreCredit,
+  }) {
+    final confidence = _number(
+      preapproval,
+      'score_confianza',
+      fallback: _number(assignment, 'score_prioridad', fallback: 50),
+    );
+    final score = confidence <= 100 ? confidence * 8 : confidence;
+    final amount = _number(
+      preapproval,
+      'monto_maximo',
+      fallback: _number(
+        assignment,
+        'monto_credito',
+        fallback: _number(coreCredit, 'monto_desembolsado'),
+      ),
+    );
+    return {
+      ...preapproval,
+      'id': _text(
+        preapproval,
+        'id',
+        fallback: _text(assignment, 'id', fallback: clientId),
+      ),
+      'user_id': clientId,
+      'cliente_id': clientId,
+      'segmento': _segmentFromConfidence(confidence),
+      'score_transaccional': score,
+      'score_final': score,
+      'monto_hipotesis': amount,
+      'monto_aprobado': amount,
+      'monto_maximo': amount,
+      'plazo_meses': _number(preapproval, 'plazo_sugerido_meses', fallback: 6),
+      'tasa_tea': _number(preapproval, 'tea_referencial', fallback: 0.60),
+      'estado': _text(
+        coreCredit,
+        'estado',
+        fallback: preapproval['vigente'] == false ? 'vencido' : 'preaprobado',
+      ),
+      'dias_mora': _number(coreCredit, 'dias_mora'),
+      'estado_pago': _number(coreCredit, 'dias_mora') >= 30
+          ? 'atraso_30'
+          : 'al_dia',
+    };
+  }
+
+  static Map<String, dynamic> _scoreFromCoreSchema({
+    required Map<String, dynamic> preapproval,
+    required Map<String, dynamic> assignment,
+    required Map<String, dynamic> rawClient,
+  }) {
+    final confidence = _number(
+      preapproval,
+      'score_confianza',
+      fallback: _number(assignment, 'score_prioridad', fallback: 50),
+    );
+    final score = confidence <= 100 ? confidence * 8 : confidence;
+    return {
+      'score_transaccional': score,
+      'segmento_preliminar': _segmentFromConfidence(confidence),
+      'monto_hipotesis': _number(
+        preapproval,
+        'monto_maximo',
+        fallback: _number(assignment, 'monto_credito'),
+      ),
+      'ingreso_promedio_ref': _number(rawClient, 'ingresos_estimados'),
+    };
+  }
+
+  static Map<String, dynamic> _fieldFileFromAssignment(
+    Map<String, dynamic> assignment,
+    Map<String, dynamic> preapproval,
+  ) {
+    final visitedAt = _text(assignment, 'timestamp_visita');
+    if (visitedAt.isEmpty && _text(assignment, 'estado_visita') != 'visitado') {
+      return const {};
+    }
+    final confidence = _number(
+      preapproval,
+      'score_confianza',
+      fallback: _number(assignment, 'score_prioridad', fallback: 50),
+    );
+    return {
+      'fecha_visita': visitedAt,
+      'recomendacion_asesor': _text(
+        assignment,
+        'resultado_visita',
+        fallback: 'visitado',
+      ),
+      'segmento_resultante': _segmentFromConfidence(confidence),
+      'score_campo': 0,
+    };
+  }
+
+  static String _segmentFromConfidence(num confidence) {
+    final score = confidence <= 100 ? confidence : confidence / 8;
+    if (score >= 80) return 'PREMIER';
+    if (score >= 60) return 'ESTANDAR';
+    if (score >= 35) return 'BASICO';
+    return 'NO_APLICA';
+  }
+
+  static List<Map<String, dynamic>> _normalisedAgencies(
+    List<Map<String, dynamic>> agencies,
+    List<Map<String, dynamic>> advisors,
+  ) {
+    final counts = <String, int>{};
+    for (final advisor in advisors) {
+      final agencyId = _text(advisor, 'agencia_id');
+      if (agencyId.isNotEmpty) counts[agencyId] = (counts[agencyId] ?? 0) + 1;
+    }
+    return agencies
+        .map(
+          (agency) => {
+            ...agency,
+            'codigo': _text(agency, 'cod_agencia'),
+            'region': _text(agency, 'region'),
+            'total_asesores': counts[_text(agency, 'id')] ?? 0,
+          },
+        )
+        .toList();
+  }
+
+  static List<Map<String, dynamic>> _normalisedAdvisors(
+    List<Map<String, dynamic>> advisors,
+    Map<String, Map<String, dynamic>> agenciesById,
+  ) {
+    return advisors.map((advisor) {
+      final agency = agenciesById[_text(advisor, 'agencia_id')] ?? const {};
+      return {
+        ...advisor,
+        'nombre_completo':
+            '${_text(advisor, 'nombres')} ${_text(advisor, 'apellidos')}'
+                .trim(),
+        'nivel': _prettyProfile(_text(advisor, 'perfil', fallback: 'operador')),
+        'agencia': _text(agency, 'nombre', fallback: 'Sin agencia'),
+        'creditos_meta': 0,
+      };
+    }).toList();
+  }
+
+  static List<Map<String, dynamic>> _buildKpis({
+    required List<Map<String, dynamic>> agencies,
+    required List<Map<String, dynamic>> assignments,
+    required List<Map<String, dynamic>> requests,
+    required List<Map<String, dynamic>> credits,
+  }) {
+    final kpis = <Map<String, dynamic>>[];
+    for (final agency in agencies.take(8)) {
+      final agencyId = _text(agency, 'id');
+      final assigned = assignments
+          .where((row) => _text(row, 'agencia_id') == agencyId)
+          .toList();
+      final visited = assigned
+          .where((row) => _text(row, 'estado_visita') == 'visitado')
+          .length;
+      final agencyRequests = requests
+          .where((row) => _text(row, 'agencia_id') == agencyId)
+          .toList();
+      final disbursed = agencyRequests
+          .where((row) => _text(row, 'estado') == 'desembolsado')
+          .length;
+      final overdue = credits.where((row) => _number(row, 'dias_mora') >= 30);
+      final conversion = assigned.isEmpty
+          ? 0
+          : (visited / assigned.length) * 100;
+      final mora30 = credits.isEmpty
+          ? 0
+          : (overdue.length / credits.length) * 100;
+      kpis.add({
+        'agencia': _text(agency, 'nombre', fallback: 'Piloto'),
+        'desembolsos': disbursed,
+        'mora_30_pct': mora30,
+        'tasa_conversion_pct': conversion,
+      });
+    }
+    if (kpis.isEmpty) {
+      final visited = assignments
+          .where((row) => _text(row, 'estado_visita') == 'visitado')
+          .length;
+      kpis.add({
+        'agencia': 'Piloto',
+        'desembolsos': requests
+            .where((row) => _text(row, 'estado') == 'desembolsado')
+            .length,
+        'mora_30_pct': credits.isEmpty
+            ? 0
+            : credits.where((row) => _number(row, 'dias_mora') >= 30).length /
+                  credits.length *
+                  100,
+        'tasa_conversion_pct': assignments.isEmpty
+            ? 0
+            : visited / assignments.length * 100,
+      });
+    }
+    return kpis;
+  }
+
+  static List<Map<String, dynamic>> _historyFromAssignments({
+    required List<Map<String, dynamic>> assignments,
+    required Map<String, Map<String, dynamic>> clientsById,
+    required Map<String, Map<String, dynamic>> preapprovalsByClientId,
+  }) {
+    return assignments
+        .where(
+          (assignment) =>
+              _text(assignment, 'timestamp_visita').isNotEmpty ||
+              _text(assignment, 'estado_visita') == 'visitado',
+        )
+        .map((assignment) {
+          final clientId = _text(assignment, 'cliente_id');
+          final rawClient = clientsById[clientId] ?? const {};
+          final preapproval = preapprovalsByClientId[clientId] ?? const {};
+          final fullName =
+              '${_text(rawClient, 'nombres')} ${_text(rawClient, 'apellidos')}'
+                  .trim();
+          return {
+            'nombre_cliente': fullName.isEmpty ? 'Cliente visitado' : fullName,
+            'fecha_visita': _text(
+              assignment,
+              'timestamp_visita',
+              fallback: _text(assignment, 'fecha_asignacion'),
+            ),
+            'recomendacion_asesor': _text(
+              assignment,
+              'resultado_visita',
+              fallback: _text(assignment, 'estado_visita'),
+            ),
+            'segmento_resultante': _segmentFromConfidence(
+              _number(preapproval, 'score_confianza', fallback: 50),
+            ),
+          };
+        })
+        .take(20)
+        .toList();
+  }
 
   static Map<String, Map<String, dynamic>> _indexBy(
     List<Map<String, dynamic>> rows,
     String key,
   ) {
     return {for (final row in rows) _text(row, key): row};
+  }
+
+  static List<String> _ids(List<Map<String, dynamic>> rows, String key) {
+    return rows
+        .map((row) => _text(row, key))
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  static Map<String, Map<String, dynamic>> _latestByKey(
+    List<Map<String, dynamic>> rows,
+    String key,
+  ) {
+    final values = <String, Map<String, dynamic>>{};
+    for (final row in rows) {
+      final id = _text(row, key);
+      if (id.isNotEmpty && !values.containsKey(id)) values[id] = row;
+    }
+    return values;
   }
 
   static Future<List<Map<String, dynamic>>> _optionalList(
@@ -821,19 +1236,6 @@ class ScoringRepository {
     } catch (_) {
       return const <Map<String, dynamic>>[];
     }
-  }
-
-  static Map<String, Map<String, dynamic>> _latestByUser(
-    List<Map<String, dynamic>> rows,
-  ) {
-    final values = <String, Map<String, dynamic>>{};
-    for (final row in rows) {
-      final userId = _text(row, 'user_id');
-      if (userId.isNotEmpty && !values.containsKey(userId)) {
-        values[userId] = row;
-      }
-    }
-    return values;
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {
@@ -857,6 +1259,11 @@ String _text(Map<String, dynamic> map, String key, {String fallback = ''}) {
   if (value == null) return fallback;
   final text = value.toString().trim();
   return text.isEmpty ? fallback : text;
+}
+
+String? _nullableText(String value) {
+  final text = value.trim();
+  return text.isEmpty ? null : text;
 }
 
 num _number(Map<String, dynamic> map, String key, {num fallback = 0}) {

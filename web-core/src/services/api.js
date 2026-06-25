@@ -30,7 +30,7 @@ api.interceptors.response.use(
 export default api
 
 export function isDemoSession() {
-  return (localStorage.getItem(TOKEN_KEY) || 'demo-falabella') === 'demo-falabella'
+  return localStorage.getItem(TOKEN_KEY) === 'demo-falabella'
 }
 
 export async function cachedGet(url, options = {}, ttlMs = 30000) {

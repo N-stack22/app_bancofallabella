@@ -50,6 +50,40 @@ def listar_solicitudes_demo(db: Session = Depends(get_db)):
         return rep_casos.solicitudes_demo()
 
 
+@router.post("/{solicitud_id}/comite")
+def decidir_comite(
+    solicitud_id: str,
+    data: DecisionComiteIn,
+    db: Session = Depends(get_db),
+    asesor: dict = Depends(get_current_asesor),
+):
+    """Aprueba, condiciona o rechaza una solicitud autenticada."""
+    try:
+        result = rep_solicitudes.decidir_comite(db, solicitud_id, data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    return result
+
+
+@router.post("/{solicitud_id}/desembolso")
+def desembolsar(
+    solicitud_id: str,
+    data: DesembolsoIn,
+    db: Session = Depends(get_db),
+    asesor: dict = Depends(get_current_asesor),
+):
+    """Marca como desembolsada una solicitud autenticada."""
+    try:
+        result = rep_solicitudes.desembolsar(db, solicitud_id, data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    return result
+
+
 @router.post("/demo/{solicitud_id}/comite")
 def decidir_comite_demo(
     solicitud_id: str,
