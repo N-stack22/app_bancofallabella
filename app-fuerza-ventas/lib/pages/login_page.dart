@@ -21,6 +21,7 @@ class _LoginPageState extends State<LoginPage> {
   DateTime? lockedUntil;
 
   static const localUserEmail = 'asesor0001@bancofalabella.local';
+  static const seededSupabaseEmail = 'alumno1@example.com';
 
   Future<void> signIn() async {
     final locked = lockedUntil;
@@ -34,7 +35,14 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       if (!SupabaseConfig.isConfigured) {
-        await _enterLocalMode();
+        if (_canEnterLocalMode()) {
+          await _enterLocalMode();
+          return;
+        }
+        registerFailedAttempt();
+        showMessage(
+          'Supabase no esta configurado en este APK. Usa 0001 / 1234 o recompila con SUPABASE_ANON_KEY.',
+        );
         return;
       }
 
@@ -88,8 +96,12 @@ class _LoginPageState extends State<LoginPage> {
     final login = emailController.text.trim().toLowerCase();
     final password = passwordController.text.trim();
     final normalized = login.contains('@') ? login : login.padLeft(4, '0');
-    return password == '1234' &&
+    final coreLocal =
+        password == '1234' &&
         (normalized == '0001' || normalized == localUserEmail);
+    final seededSupabase =
+        password == '12345' && normalized == seededSupabaseEmail;
+    return coreLocal || seededSupabase;
   }
 
   Future<void> _enterLocalMode() async {
