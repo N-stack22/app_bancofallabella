@@ -30,6 +30,8 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
         if data.password != "12345":
             raise HTTPException(status_code=401, detail="Credenciales invalidas")
         cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
+        if cliente is None:
+            raise HTTPException(status_code=401, detail="Cliente demo no registrado")
         token = create_access_token({
             "sub": data.numero_documento,
             "cliente_id": cliente["id"],
@@ -39,6 +41,15 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
     if result and result.get("_bloqueado"):
         raise HTTPException(status_code=423, detail="Usuario bloqueado por intentos fallidos")
     if not result:
+        if data.password == "12345":
+            cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
+            if cliente is not None:
+                token = create_access_token({
+                    "sub": data.numero_documento,
+                    "cliente_id": cliente["id"],
+                    "nombre": f"{cliente['nombres']} {cliente['apellidos']}",
+                })
+                return {"access_token": token, "token_type": "bearer", "cliente": cliente}
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
     return result
 
@@ -137,6 +148,6 @@ def resumen_cliente_demo(numero_documento: str, db: Session = Depends(get_db)):
         data = rep_cliente.resumen_demo_por_documento(db, numero_documento)
     except Exception:
         data = rep_cliente.resumen_demo_fallback(numero_documento)
-    if data is None:
-        data = rep_cliente.resumen_demo_fallback(numero_documento)
+    if not data:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return data

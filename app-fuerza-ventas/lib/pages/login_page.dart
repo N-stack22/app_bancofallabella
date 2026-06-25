@@ -84,7 +84,13 @@ class _LoginPageState extends State<LoginPage> {
     return 'asesor$code@bancofalabella.local';
   }
 
-  bool _canEnterLocalMode() => passwordController.text.trim() == '12345';
+  bool _canEnterLocalMode() {
+    final login = emailController.text.trim().toLowerCase();
+    final password = passwordController.text.trim();
+    final normalized = login.contains('@') ? login : login.padLeft(4, '0');
+    return password == '1234' &&
+        (normalized == '0001' || normalized == localUserEmail);
+  }
 
   Future<void> _enterLocalMode() async {
     await Future<void>.delayed(const Duration(milliseconds: 350));
@@ -202,8 +208,8 @@ class _LoginPageState extends State<LoginPage> {
                               if (password.isEmpty) {
                                 return 'Ingrese su contrasena';
                               }
-                              if (password.length < 5) {
-                                return 'La contrasena debe tener minimo 5 caracteres';
+                              if (password.length < 4) {
+                                return 'La contrasena debe tener minimo 4 caracteres';
                               }
                               return null;
                             },

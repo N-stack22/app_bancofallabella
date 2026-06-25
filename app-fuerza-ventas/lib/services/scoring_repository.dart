@@ -1012,7 +1012,7 @@ class ScoringRepository {
 
   static Map<String, dynamic> _advisorFromSession(String? email) => {
     'id': 1,
-    'nombre_completo': 'Nathalie Tatiana Rodriguez Rios',
+    'nombre_completo': 'Carlos Ramirez',
     'email': email ?? 'asesor0001@bancofalabella.local',
     'agencia': 'Agencia Huancayo Centro',
     'nivel': 'Senior II',
@@ -1110,8 +1110,8 @@ class ScoringRepository {
     final clients = [
       _demoClient(
         id: '44444444-4444-4444-4444-444444444444',
-        name: 'Alumno',
-        lastName: 'Uno Demo',
+        name: 'Anaximandro',
+        lastName: 'Quispe',
         business: 'Bodega',
         district: 'Huancayo',
         segment: 'PREMIER',
@@ -1126,9 +1126,9 @@ class ScoringRepository {
       ),
       _demoClient(
         id: '55555555-5555-5555-5555-555555555555',
-        name: 'Rosa',
-        lastName: 'Quispe Flores',
-        business: 'Puesto de abarrotes',
+        name: 'Eulalia',
+        lastName: 'Mamani',
+        business: 'Restaurante',
         district: 'El Tambo',
         segment: 'ESTANDAR',
         score: 562,
@@ -1141,9 +1141,9 @@ class ScoringRepository {
       ),
       _demoClient(
         id: '66666666-6666-6666-6666-666666666666',
-        name: 'Marco',
-        lastName: 'Palian Rojas',
-        business: 'Ferreteria',
+        name: 'Teofilo',
+        lastName: 'Huaman',
+        business: 'Carpinteria',
         district: 'Chilca',
         segment: 'BASICO',
         score: 438,
@@ -1160,7 +1160,7 @@ class ScoringRepository {
       isDemo: true,
       advisor: const {
         'id': 1,
-        'nombre_completo': 'Nathalie Tatiana Rodriguez Rios',
+        'nombre_completo': 'Carlos Ramirez',
         'email': 'asesor0001@bancofalabella.local',
         'agencia': 'Agencia Huancayo Centro',
         'nivel': 'Senior II',
@@ -1189,7 +1189,7 @@ class ScoringRepository {
       advisors: const [
         {
           'codigo': 'AG-001-01',
-          'nombre_completo': 'Nathalie Tatiana Rodriguez Rios',
+          'nombre_completo': 'Carlos Ramirez',
           'nivel': 'Senior II',
           'agencia': 'Agencia Huancayo Centro',
           'creditos_meta': 16,
@@ -1218,9 +1218,9 @@ class ScoringRepository {
       history: const [
         {
           'fecha_visita': '2026-05-24',
-          'asesor_nombre': 'Nathalie Tatiana Rodriguez Rios',
+          'asesor_nombre': 'Carlos Ramirez',
           'agencia': 'Agencia Huancayo Centro',
-          'nombre_cliente': 'Alumno Uno Demo',
+          'nombre_cliente': 'Anaximandro Quispe',
           'score_final': 845,
           'segmento_resultante': 'PREMIER',
           'recomendacion_asesor': 'aprobar',
@@ -1247,7 +1247,7 @@ class ScoringRepository {
       ],
       bureau: const [
         {
-          'dni_consultado': '12345678',
+          'dni_consultado': '40118120',
           'calificacion_sbs': 'Normal',
           'entidades_con_deuda': 1,
           'deuda_total_pen': 2500,
@@ -1315,7 +1315,11 @@ class ScoringRepository {
         'user_id': userId,
         'nombres': name,
         'apellidos': lastName,
-        'dni': '12345678',
+        'dni': id.startsWith('4444')
+            ? '40118120'
+            : id.startsWith('5555')
+                ? '41223341'
+                : '42330336',
         'telefono': '999888777',
         'distrito': district,
         'departamento': 'Junin',
@@ -1345,7 +1349,7 @@ class ScoringRepository {
       },
       fieldFile: hasVisit
           ? {
-              'asesor_nombre': 'Nathalie Tatiana Rodriguez Rios',
+              'asesor_nombre': 'Carlos Ramirez',
               'agencia': 'Agencia Huancayo Centro',
               'fecha_visita': '2026-05-24',
               'negocio_verificado': true,

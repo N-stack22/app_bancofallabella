@@ -734,7 +734,6 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    restoreSecureSession();
   }
 
   @override

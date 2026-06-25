@@ -10,6 +10,7 @@ from app.models.mdl_cliente_mobile import (
     UsuarioCliente, CrCuentaAhorro, CrCredito, CrCronogramaPago,
     CrMovimiento, Tarjeta, OperacionCliente, Notificacion,
 )
+from app.data.casos_credito import casos_completos
 
 DEMO_CLIENTE_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -168,8 +169,22 @@ def resumen_demo_por_documento(db: Session, numero_documento: str) -> dict | Non
     }
 
 
-def cliente_demo_dict(numero_documento: str = "72028183") -> dict:
+def cliente_demo_dict(numero_documento: str = "72028183") -> dict | None:
     """Cliente demo serializable para operar cuando Supabase aun no responde."""
+    if numero_documento != "72028183":
+        caso = _caso_por_documento(numero_documento)
+        if caso is None:
+            return None
+        return {
+            "id": _uuid_from_document(numero_documento),
+            "cod_cliente": f"CLI-{numero_documento[-4:]}",
+            "numero_documento": numero_documento,
+            "nombres": caso["nombres"],
+            "apellidos": caso["apellidos"],
+            "email": f"{numero_documento}@cliente.falabella.pe",
+            "telefono": caso.get("telefono"),
+            "direccion": f"{caso.get('distrito', 'Huancayo')}, Junin",
+        }
     return {
         "id": DEMO_CLIENTE_ID,
         "cod_cliente": f"CLI-{numero_documento[-4:]}",
@@ -184,10 +199,25 @@ def cliente_demo_dict(numero_documento: str = "72028183") -> dict:
 
 def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
     """Resumen homebanking sin consultas SQL, usado como respaldo de Railway."""
+    cliente = cliente_demo_dict(numero_documento)
+    if cliente is None:
+        return {}
+    caso = _caso_por_documento(numero_documento) or {
+        "numero_expediente": "BF-DEMO-CLIENTE",
+        "monto_solicitado": 8500.00,
+        "monto_aprobado": 8500.00,
+        "estado_final": "desembolsado",
+        "tea_referencial": 43.92,
+        "plazo_meses": 12,
+        "cuota_final": 825.40,
+    }
     now = datetime.now(timezone.utc)
     cod_credito = f"CR-DEMO-{numero_documento[-4:]}"
+    monto_credito = float(caso.get("monto_aprobado") or caso.get("monto_solicitado") or 0)
+    plazo = int(caso.get("plazo_meses") or 12)
+    cuota = float(caso.get("cuota_final") or (monto_credito / plazo if plazo else monto_credito))
     return {
-        "cliente": cliente_demo_dict(numero_documento),
+        "cliente": cliente,
         "cuentas": [
             {
                 "id": "aaaaaaaa-1111-4222-8333-444444444444",
@@ -206,15 +236,15 @@ def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
                 "id": "bbbbbbbb-1111-4222-8333-444444444444",
                 "cod_cuenta_credito": cod_credito,
                 "producto": "Credito Empresarial Banco Falabella",
-                "monto_desembolsado": 8500.00,
-                "saldo_capital": 6840.00,
-                "saldo_total": 7420.00,
+                "monto_desembolsado": monto_credito,
+                "saldo_capital": round(monto_credito * 0.72, 2),
+                "saldo_total": round(cuota * plazo, 2),
                 "dias_mora": 0,
                 "calificacion_interna": "NORMAL",
                 "estado": "vigente",
                 "fecha_desembolso": date.today().isoformat(),
-                "tea": 43.92,
-                "cuotas_total": 12,
+                "tea": float(caso.get("tea_referencial") or 43.92),
+                "cuotas_total": plazo,
                 "cuotas_pagadas": 3,
             }
         ],
@@ -225,14 +255,14 @@ def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
                     "cod_cuenta_credito": cod_credito,
                     "nro_cuota": i,
                     "fecha_vencimiento": (date.today() + timedelta(days=30 * i)).isoformat(),
-                    "monto_cuota": 825.40,
-                    "monto_capital": 708.33,
-                    "monto_interes": 117.07,
-                    "saldo": max(8500 - (708.33 * i), 0),
+                    "monto_cuota": round(cuota, 2),
+                    "monto_capital": round(monto_credito / plazo, 2) if plazo else monto_credito,
+                    "monto_interes": max(round(cuota - (monto_credito / plazo), 2), 0) if plazo else 0,
+                    "saldo": max(round(monto_credito - ((monto_credito / plazo) * i), 2), 0) if plazo else 0,
                     "estado_cuota": "pendiente" if i > 3 else "pagado",
                     "fecha_pago": None if i > 3 else (date.today() - timedelta(days=30)).isoformat(),
                 }
-                for i in range(1, 13)
+                for i in range(1, plazo + 1)
             ]
         },
         "movimientos": [
@@ -243,7 +273,7 @@ def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
                 "tipo": "CRE",
                 "concepto": "Desembolso credito empresarial",
                 "canal": "CORE",
-                "monto": 8500.00,
+                "monto": monto_credito,
                 "moneda": "PEN",
                 "fecha_operacion": now.isoformat(),
             },
@@ -283,14 +313,26 @@ def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
         ],
         "solicitudes": [
             {
-                "numero_expediente": "BF-DEMO-CLIENTE",
-                "monto_solicitado": 8500.00,
-                "monto_aprobado": 8500.00,
-                "estado": "desembolsado",
+                "numero_expediente": caso["numero_expediente"],
+                "monto_solicitado": float(caso.get("monto_solicitado") or monto_credito),
+                "monto_aprobado": monto_credito,
+                "estado": caso.get("estado_final") or "desembolsado",
                 "created_at": now.isoformat(),
             }
         ],
     }
+
+
+def _caso_por_documento(numero_documento: str) -> dict | None:
+    for caso in casos_completos():
+        if str(caso.get("numero_documento")) == str(numero_documento):
+            return caso
+    return None
+
+
+def _uuid_from_document(numero_documento: str) -> str:
+    suffix = numero_documento[-12:].rjust(12, "0")
+    return f"22222222-3333-4444-8555-{suffix}"
 
 
 def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:

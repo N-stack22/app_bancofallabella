@@ -1803,7 +1803,7 @@ class _AdvisorHeader extends StatelessWidget {
                   _text(
                     advisor,
                     'nombre_completo',
-                    fallback: 'Nathalie Tatiana Rodriguez Rios',
+                    fallback: 'Carlos Ramirez',
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
