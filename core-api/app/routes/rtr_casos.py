@@ -24,10 +24,14 @@ def dashboard_casos():
 @router.get("/conexion")
 def conexion(db: Session = Depends(get_db)):
     """Diagnostico rapido de API REST + PostgreSQL bd_core_mobile."""
-    db.execute(text("SELECT 1")).scalar()
+    bd_status = "ok"
+    try:
+        db.execute(text("SELECT 1")).scalar()
+    except Exception:
+        bd_status = "pendiente"
     return {
         "api": "ok",
-        "bd_core_mobile": "ok",
+        "bd_core_mobile": bd_status,
         "core_financiero": "sync_outbox",
         "marca": "Banco Falabella",
         "fecha_hora": datetime.now().isoformat(timespec="seconds"),

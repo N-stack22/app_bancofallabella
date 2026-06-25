@@ -79,7 +79,7 @@ export function extractError(err, fallback = 'Ocurrió un error. Intente nuevame
   const detail = err?.response?.data?.detail
   if (detail == null) {
     if (err?.message === 'Network Error') {
-      return 'No se pudo conectar con el servidor. Verifique que el Core Mobile (puerto 8003) esté activo.'
+      return 'No se pudo conectar con el servidor. Verifique que el Core Mobile publicado este activo.'
     }
     return err?.message || fallback
   }

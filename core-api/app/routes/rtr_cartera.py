@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.cfg_database import get_db
 from app.core.cfg_auth import get_current_asesor
 from app.schemas.sch_cartera import CarteraItemOut, EnviarComiteIn, MarcarVisitaIn
-from app.repositories import rep_cartera
+from app.repositories import rep_cartera, rep_casos
 
 router = APIRouter()
 
@@ -38,10 +38,13 @@ def listar_cartera_demo(
     db: Session = Depends(get_db),
 ):
     """Cartera demo para integrar Flutter sin token durante la practica."""
-    asesor = rep_cartera.primer_asesor_activo(db)
-    if asesor is None:
-        return []
-    return rep_cartera.listar_por_asesor(db, asesor, fecha or date.today())
+    try:
+        asesor = rep_cartera.primer_asesor_activo(db)
+        if asesor is None:
+            return rep_casos.cartera_demo()
+        return rep_cartera.listar_por_asesor(db, asesor, fecha or date.today())
+    except Exception:
+        return rep_casos.cartera_demo()
 
 
 @router.post("/demo/{cartera_id}/visita")

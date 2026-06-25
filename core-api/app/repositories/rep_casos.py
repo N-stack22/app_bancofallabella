@@ -33,6 +33,68 @@ def resumen() -> dict:
     }
 
 
+def cartera_demo(limit: int = 12) -> list[dict]:
+    """Cartera estable para el portal cuando la BD demo aun no fue sembrada."""
+    estados = ["pendiente", "visitado", "pendiente", "reagendado"]
+    items = []
+    for idx, caso in enumerate(casos_completos()[:limit]):
+        items.append(
+            {
+                "id": f"demo-cartera-{caso['caso']:02d}",
+                "cliente_id": f"demo-cliente-{caso['caso']:02d}",
+                "cliente_nombre": f"{caso['nombres']} {caso['apellidos']}",
+                "documento": caso["numero_documento"],
+                "numero_expediente": caso["numero_expediente"],
+                "tipo_gestion": "NUEVA_SOLICITUD",
+                "prioridad": _prioridad_demo(caso["monto_solicitado"]),
+                "score_prioridad": _score_demo(caso["monto_solicitado"]),
+                "monto_credito": float(caso["monto_solicitado"] or 0),
+                "estado_visita": estados[idx % len(estados)],
+                "orden_manual": idx + 1,
+                "fecha_asignacion": date.today().isoformat(),
+                "fecha_hora_solicitud": datetime.now(timezone.utc).isoformat(),
+                "timestamp_visita": None,
+                "lat": caso.get("lat"),
+                "lng": caso.get("lng"),
+            }
+        )
+    return items
+
+
+def solicitudes_demo(limit: int = 12) -> list[dict]:
+    """Solicitudes estables para el portal cuando la BD demo aun no fue sembrada."""
+    return [
+        {
+            "id": f"demo-solicitud-{caso['caso']:02d}",
+            "numero_expediente": caso["numero_expediente"],
+            "cliente_nombre": f"{caso['nombres']} {caso['apellidos']}",
+            "monto_solicitado": float(caso["monto_solicitado"] or 0),
+            "monto_aprobado": float(caso["monto_aprobado"] or 0),
+            "estado": caso["estado_final"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        for caso in casos_completos()[:limit]
+    ]
+
+
+def _prioridad_demo(monto: float) -> str:
+    if monto >= 8000:
+        return "alta"
+    if monto >= 3000:
+        return "media"
+    return "normal"
+
+
+def _score_demo(monto: float) -> int:
+    if monto >= 10000:
+        return 90
+    if monto >= 5000:
+        return 75
+    if monto >= 3000:
+        return 60
+    return 40
+
+
 def sembrar(db: Session) -> dict:
     """Crea el dataset completo de los 30 casos del PDF aplicado a Banco Falabella.
 

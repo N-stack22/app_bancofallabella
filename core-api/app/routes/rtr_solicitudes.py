@@ -6,7 +6,7 @@ from app.core.cfg_auth import get_current_asesor
 from app.schemas.sch_solicitudes import (
     DecisionComiteIn, DesembolsoIn, SolicitudIn, SolicitudCreada, SolicitudResumen,
 )
-from app.repositories import rep_solicitudes
+from app.repositories import rep_solicitudes, rep_casos
 
 router = APIRouter()
 
@@ -44,7 +44,10 @@ def listar_solicitudes(
 @router.get("/demo", response_model=list[SolicitudResumen])
 def listar_solicitudes_demo(db: Session = Depends(get_db)):
     """Historial demo sin token para portal y Fuerza de Ventas web."""
-    return rep_solicitudes.listar_demo(db)
+    try:
+        return rep_solicitudes.listar_demo(db)
+    except Exception:
+        return rep_casos.solicitudes_demo()
 
 
 @router.post("/demo/{solicitud_id}/comite")
