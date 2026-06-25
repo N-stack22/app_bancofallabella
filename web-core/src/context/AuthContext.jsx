@@ -4,9 +4,26 @@ import * as authService from '../services/authService.js'
 // Contexto de autenticación del asesor (portal del personal).
 const AuthContext = createContext(null)
 
+function getInitialToken() {
+  const token = authService.getStoredToken()
+  if (token === 'demo-falabella') {
+    authService.clearSession()
+    return null
+  }
+  return token
+}
+
+function getInitialUser() {
+  if (authService.getStoredToken() === 'demo-falabella') {
+    authService.clearSession()
+    return null
+  }
+  return authService.getStoredUser()
+}
+
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => authService.getStoredToken())
-  const [user, setUser] = useState(() => authService.getStoredUser())
+  const [token, setToken] = useState(() => getInitialToken())
+  const [user, setUser] = useState(() => getInitialUser())
 
   const login = useCallback(async (codigoEmpleado, password) => {
     const { token: newToken, user: newUser } = await authService.login(codigoEmpleado, password)
