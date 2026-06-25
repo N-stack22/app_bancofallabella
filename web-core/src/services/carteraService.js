@@ -4,12 +4,20 @@ import api, { cachedGet, invalidateApiCache, isDemoSession } from './api.js'
 export async function listarCartera(fecha) {
   const params = fecha ? { fecha } : {}
   if (isDemoSession()) {
-    return cachedGet('/cartera/demo', { params }, 45000)
+    try {
+      return await cachedGet('/cartera/demo', { params }, 45000)
+    } catch (_) {
+      return []
+    }
   }
   try {
     return await cachedGet('/cartera', { params }, 45000)
   } catch (_) {
-    return cachedGet('/cartera/demo', { params }, 45000)
+    try {
+      return await cachedGet('/cartera/demo', { params }, 45000)
+    } catch (_) {
+      return []
+    }
   }
 }
 
