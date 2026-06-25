@@ -1,5 +1,4 @@
 import 'package:bancofalabella_app2/supabase_config.dart';
-import 'package:bancofalabella_app2/views/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -20,8 +19,7 @@ class _LoginPageState extends State<LoginPage> {
   int failedAttempts = 0;
   DateTime? lockedUntil;
 
-  static const localUserEmail = 'asesor0001@bancofalabella.local';
-  static const seededSupabaseEmail = 'alumno1@example.com';
+  static const defaultAdvisorEmail = 'asesor0001@bancofalabella.local';
 
   Future<void> signIn() async {
     final locked = lockedUntil;
@@ -35,13 +33,9 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       if (!SupabaseConfig.isConfigured) {
-        if (_canEnterLocalMode()) {
-          await _enterLocalMode();
-          return;
-        }
         registerFailedAttempt();
         showMessage(
-          'Supabase no esta configurado en este APK. Usa 0001 / 1234 o recompila con SUPABASE_ANON_KEY.',
+          'Este APK no tiene SUPABASE_ANON_KEY. Recompila la app con la clave anon publica de Supabase.',
         );
         return;
       }
@@ -52,17 +46,9 @@ class _LoginPageState extends State<LoginPage> {
       );
       failedAttempts = 0;
     } on AuthException catch (error) {
-      if (_canEnterLocalMode()) {
-        await _enterLocalMode();
-        return;
-      }
       registerFailedAttempt();
       showMessage(error.message);
     } catch (_) {
-      if (_canEnterLocalMode()) {
-        await _enterLocalMode();
-        return;
-      }
       registerFailedAttempt();
       showMessage('No se pudo iniciar sesion. Revisa tu conexion o Supabase.');
     } finally {
@@ -87,38 +73,9 @@ class _LoginPageState extends State<LoginPage> {
 
   String _loginToEmail(String value) {
     if (value.contains('@')) return value;
-    if (value.trim().isEmpty) return localUserEmail;
+    if (value.trim().isEmpty) return defaultAdvisorEmail;
     final code = value.padLeft(4, '0');
     return 'asesor$code@bancofalabella.local';
-  }
-
-  bool _canEnterLocalMode() {
-    final login = emailController.text.trim().toLowerCase();
-    final password = passwordController.text.trim();
-    final normalized = login.contains('@') ? login : login.padLeft(4, '0');
-    final coreLocal =
-        password == '1234' &&
-        (normalized == '0001' || normalized == localUserEmail);
-    final seededSupabase =
-        password == '12345' && normalized == seededSupabaseEmail;
-    return coreLocal || seededSupabase;
-  }
-
-  Future<void> _enterLocalMode() async {
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-    if (!_canEnterLocalMode()) {
-      throw const AuthException('Credenciales locales invalidas.');
-    }
-    failedAttempts = 0;
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => HomePage(
-          demoMode: true,
-          userEmail: _loginToEmail(emailController.text.trim()),
-        ),
-      ),
-    );
   }
 
   @override

@@ -14,7 +14,6 @@ class _AppColors {
   static const green = Color(0xFF123D37);
   static const deepGreen = Color(0xFF071F1B);
   static const lime = Color(0xFFB8D932);
-  static const softGreen = Color(0xFFE9F1EC);
   static const border = Color(0xFFCAD6D8);
   static const ink = Color(0xFF101820);
   static const blue = Color(0xFF1D5FA7);
@@ -26,9 +25,8 @@ class _AppColors {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.demoMode = false, this.userEmail});
+  const HomePage({super.key, this.userEmail});
 
-  final bool demoMode;
   final String? userEmail;
 
   @override
@@ -41,7 +39,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    viewModel = HomeViewModel(demoMode: widget.demoMode);
+    viewModel = HomeViewModel();
   }
 
   @override
@@ -79,7 +77,7 @@ class _HomePageState extends State<HomePage> {
             ),
             IconButton(
               tooltip: 'Cerrar sesion',
-              onPressed: widget.demoMode ? null : viewModel.signOut,
+              onPressed: viewModel.signOut,
               icon: const Icon(Icons.logout),
             ),
           ],
@@ -257,12 +255,6 @@ class _PortfolioTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (data.isDemo)
-            const _Banner(
-              icon: Icons.info_outline,
-              text:
-                  'Modo academico activo. Datos conectados al Core API cuando esta disponible.',
-            ),
           _AdvisorHeader(advisor: data.advisor),
           const SizedBox(height: 16),
           _SyncBanner(
@@ -390,7 +382,8 @@ class _RouteTabState extends State<_RouteTab> {
   @override
   Widget build(BuildContext context) {
     final baseRouteClients =
-        optimizedRoute ?? RouteViewModel.withDemoDestination(widget.clients);
+        optimizedRoute ??
+        RouteViewModel.withReferenceDestination(widget.clients);
     final routeClients = _clientsWithLocalLocations(baseRouteClients);
     final selected = routeSelected ?? widget.selected;
     final activeClient =
@@ -1221,7 +1214,7 @@ class _ApplicationTabState extends State<_ApplicationTab> {
         amount: amount,
         term: term,
         purpose: purpose,
-        signature: 'firma_demo_${DateTime.now().millisecondsSinceEpoch}',
+        signature: 'firma_digital_${DateTime.now().millisecondsSinceEpoch}',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1800,11 +1793,7 @@ class _AdvisorHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _text(
-                    advisor,
-                    'nombre_completo',
-                    fallback: 'Carlos Ramirez',
-                  ),
+                  _text(advisor, 'nombre_completo', fallback: 'Carlos Ramirez'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -2835,40 +2824,6 @@ class _SectionTitle extends StatelessWidget {
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Banner extends StatelessWidget {
-  const _Banner({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _AppColors.softGreen,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: _AppColors.orange),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text)),
         ],
       ),
     );

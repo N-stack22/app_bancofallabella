@@ -18,10 +18,10 @@ BEGIN
   END IF;
 END $$;
 
--- El seed del profesor crea public.auth_mock, pero las tablas del scoring
--- referencian auth.users. Este trigger crea usuarios demo automaticamente
--- cuando el seed inserta perfiles_clientes.
-CREATE OR REPLACE FUNCTION public.ensure_demo_auth_user()
+-- El seed base crea public.auth_mock, pero las tablas del scoring
+-- referencian auth.users. Este trigger crea usuarios cliente automaticamente
+-- cuando se insertan perfiles_clientes.
+CREATE OR REPLACE FUNCTION public.ensure_cliente_auth_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -38,7 +38,10 @@ BEGIN
   FROM public.auth_mock
   WHERE id = NEW.user_id;
 
-  v_email := COALESCE(v_email, NEW.user_id::TEXT || '@cliente.demo');
+  v_email := COALESCE(
+    v_email,
+    NEW.user_id::TEXT || '@cliente.bancofalabella.local'
+  );
 
   INSERT INTO auth.users (
     instance_id,
@@ -62,7 +65,7 @@ BEGIN
     'authenticated',
     'authenticated',
     v_email,
-    crypt('ClienteDemo123', gen_salt('bf')),
+    crypt('ClienteBancoFalabella123', gen_salt('bf')),
     now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb,
@@ -85,4 +88,4 @@ DROP TRIGGER IF EXISTS trg_perfiles_clientes_auth_user
 CREATE TRIGGER trg_perfiles_clientes_auth_user
   BEFORE INSERT ON public.perfiles_clientes
   FOR EACH ROW
-  EXECUTE FUNCTION public.ensure_demo_auth_user();
+  EXECUTE FUNCTION public.ensure_cliente_auth_user();

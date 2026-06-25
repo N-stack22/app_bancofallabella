@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:bancofalabella_app2/models/sales_models.dart';
 
 class RouteViewModel {
-  static List<PreapprovedClient> withDemoDestination(
+  static List<PreapprovedClient> withReferenceDestination(
     List<PreapprovedClient> clients,
   ) {
     return [_plazaVeaHuancayo, ...clients];
@@ -21,9 +21,12 @@ class RouteViewModel {
 
     while (pending.isNotEmpty) {
       pending.sort(
-        (a, b) => _distance(currentLat, currentLng, a.lat, a.lng).compareTo(
-          _distance(currentLat, currentLng, b.lat, b.lng),
-        ),
+        (a, b) => _distance(
+          currentLat,
+          currentLng,
+          a.lat,
+          a.lng,
+        ).compareTo(_distance(currentLat, currentLng, b.lat, b.lng)),
       );
       final next = pending.removeAt(0);
       ordered.add(next);

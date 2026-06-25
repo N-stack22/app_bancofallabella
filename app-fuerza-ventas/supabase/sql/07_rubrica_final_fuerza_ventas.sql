@@ -67,7 +67,7 @@ CROSS JOIN LATERAL (
   ORDER BY id
   LIMIT 1
 ) an
-WHERE u.email = 'alumno1@example.com'
+WHERE u.email = 'asesor0001@bancofalabella.local'
 ON CONFLICT (user_id) DO UPDATE SET
   asesor_id = EXCLUDED.asesor_id,
   agencia_id = EXCLUDED.agencia_id,

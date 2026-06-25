@@ -5,7 +5,7 @@
 -- Crea las tablas operativas pedidas en la guia S11:
 -- cartera_diaria, solicitudes_credito, documentos, buro,
 -- cobranza, alertas y notas internas. Tambien genera una cartera
--- demo compatible desde los datos ya cargados en Semana 10.
+-- operativa desde los datos ya cargados en Semana 10.
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS public.solicitudes_notas_internas (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Cartera demo para el dia actual, reutilizando creditos ya cargados.
+-- Cartera operativa para el dia actual, reutilizando creditos ya cargados.
 INSERT INTO public.cartera_diaria (
   asesor_id,
   cliente_user_id,
@@ -223,7 +223,7 @@ ON CONFLICT (asesor_id, cliente_user_id, fecha_asignacion) DO UPDATE SET
   score_prioridad = EXCLUDED.score_prioridad,
   updated_at = now();
 
--- Solicitudes demo para alimentar estados, transmision y reportes.
+-- Solicitudes operativas para alimentar estados, transmision y reportes.
 INSERT INTO public.solicitudes_credito (
   numero_expediente,
   asesor_id,

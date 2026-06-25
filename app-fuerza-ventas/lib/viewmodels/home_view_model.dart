@@ -5,13 +5,12 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
 class HomeViewModel extends ChangeNotifier {
-  HomeViewModel({required this.demoMode, ScoringRepository? repository})
+  HomeViewModel({ScoringRepository? repository})
     : repository = repository ?? ScoringRepository() {
-    dashboardFuture = this.repository.loadDashboard(forceDemo: demoMode);
+    dashboardFuture = this.repository.loadDashboard();
     _watchConnectivity();
   }
 
-  final bool demoMode;
   final ScoringRepository repository;
   late Future<SalesDashboardData> dashboardFuture;
 
@@ -27,16 +26,13 @@ class HomeViewModel extends ChangeNotifier {
   bool _disposed = false;
 
   Future<void> refresh() async {
-    dashboardFuture = repository.loadDashboard(
-      forceDemo: demoMode,
-      forceRefresh: true,
-    );
+    dashboardFuture = repository.loadDashboard(forceRefresh: true);
     notifyListeners();
   }
 
   void updateClientLocation(PreapprovedClient client) {
     _locationOverrides[client.userId] = client;
-    dashboardFuture = repository.loadDashboard(forceDemo: demoMode);
+    dashboardFuture = repository.loadDashboard();
     notifyListeners();
   }
 
@@ -101,7 +97,6 @@ class HomeViewModel extends ChangeNotifier {
       lastSyncLabel: data.lastSyncLabel,
       role: data.role,
       online: online,
-      isDemo: data.isDemo,
     );
   }
 

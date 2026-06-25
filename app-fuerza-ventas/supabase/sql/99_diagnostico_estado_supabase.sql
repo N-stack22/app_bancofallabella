@@ -52,14 +52,14 @@ UNION ALL SELECT 'conteo', 'consultas_buro', COUNT(*)::TEXT FROM public.consulta
 UNION ALL SELECT 'conteo', 'acciones_cobranza', COUNT(*)::TEXT FROM public.acciones_cobranza
 UNION ALL SELECT 'conteo', 'alertas_cartera', COUNT(*)::TEXT FROM public.alertas_cartera;
 
--- 3) Usuario de prueba de la app
+-- 3) Usuario asesor de la app
 SELECT
-  'usuario_prueba' AS tipo_reporte,
+  'usuario_asesor' AS tipo_reporte,
   email,
   id::TEXT AS user_id,
   CASE WHEN email_confirmed_at IS NULL THEN 'SIN CONFIRMAR' ELSE 'CONFIRMADO' END AS estado
 FROM auth.users
-WHERE email = 'alumno1@example.com';
+WHERE email = 'asesor0001@bancofalabella.local';
 
 -- 4) Estado de cartera para la app fuerza de ventas
 SELECT

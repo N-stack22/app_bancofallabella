@@ -1,31 +1,8 @@
-import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:bancofalabella_app2/supabase_config.dart';
-import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-const configuredCoreBaseUrl = String.fromEnvironment(
-  'CORE_BASE_URL',
-  defaultValue: '',
-);
-const productionCoreBaseUrl =
-    'https://n-stack22-sistemagestionacademica-production.up.railway.app';
-const webCoreBaseUrl = String.fromEnvironment(
-  'WEB_CORE_BASE_URL',
-  defaultValue: productionCoreBaseUrl,
-);
-const androidCoreBaseUrl = String.fromEnvironment(
-  'ANDROID_CORE_BASE_URL',
-  defaultValue: productionCoreBaseUrl,
-);
-const fallbackCoreBaseUrl = webCoreBaseUrl;
-
-String get coreBaseUrl {
-  if (configuredCoreBaseUrl.isNotEmpty) return configuredCoreBaseUrl;
-  return kIsWeb ? webCoreBaseUrl : androidCoreBaseUrl;
-}
 
 class SalesDashboardData {
   const SalesDashboardData({
@@ -43,7 +20,6 @@ class SalesDashboardData {
     required this.lastSyncLabel,
     required this.role,
     required this.online,
-    required this.isDemo,
   });
 
   final Map<String, dynamic> advisor;
@@ -60,7 +36,6 @@ class SalesDashboardData {
   final String lastSyncLabel;
   final String role;
   final bool online;
-  final bool isDemo;
 }
 
 class PreapprovedClient {
@@ -129,7 +104,7 @@ class PreapprovedClient {
       _number(credit, 'monto_aprobado', fallback: hypothesisAmount);
   num get lat => _number(profile, 'lat_negocio');
   num get lng => _number(profile, 'lng_negocio');
-  bool get isRouteDemoDestination => userId.startsWith('ruta-');
+  bool get isRouteReferenceDestination => userId.startsWith('ruta-');
   bool get hasVisit => fieldFile.isNotEmpty;
 
   PreapprovedClient withBusinessLocation({
@@ -398,10 +373,7 @@ class ScoringRepository {
   SalesDashboardData? _cachedDashboard;
   DateTime? _cachedAt;
 
-  Future<SalesDashboardData> loadDashboard({
-    bool forceDemo = false,
-    bool forceRefresh = false,
-  }) async {
+  Future<SalesDashboardData> loadDashboard({bool forceRefresh = false}) async {
     final now = DateTime.now();
     if (!forceRefresh &&
         _cachedDashboard != null &&
@@ -416,18 +388,17 @@ class ScoringRepository {
       return data;
     }
 
-    if (!forceDemo) {
-      final coreData = await _tryLoadCoreDashboard();
-      if (coreData != null) return remember(coreData);
-    }
-
-    if (forceDemo || !SupabaseConfig.isConfigured) {
-      return remember(_demoData);
+    if (!SupabaseConfig.isConfigured) {
+      throw StateError(
+        'Supabase no esta configurado. Falta SUPABASE_ANON_KEY en el APK.',
+      );
     }
 
     final client = Supabase.instance.client;
     final currentUserId = client.auth.currentUser?.id;
-    if (currentUserId == null) return remember(_demoData);
+    if (currentUserId == null) {
+      throw StateError('No hay sesion Supabase activa para el asesor.');
+    }
 
     try {
       final results = await Future.wait<dynamic>([
@@ -443,7 +414,6 @@ class ScoringRepository {
       ]);
 
       final credits = _asList(results[0]);
-      if (credits.isEmpty) return _demoData;
 
       final userIds = credits
           .map((item) => _text(item, 'user_id'))
@@ -571,163 +541,11 @@ class ScoringRepository {
               ? 'Operador'
               : _text(roleRows.first, 'perfil', fallback: 'Operador'),
           online: true,
-          isDemo: false,
         ),
       );
-    } catch (_) {
-      return remember(_demoData);
+    } catch (error) {
+      throw StateError('No se pudo cargar datos desde Supabase: $error');
     }
-  }
-
-  Future<SalesDashboardData?> _tryLoadCoreDashboard() async {
-    try {
-      final rows = await _getCoreList('/cartera/demo');
-      if (rows.isEmpty) return null;
-      final requests = await _optionalList(_getCoreList('/solicitudes/demo'));
-      final history = await _optionalList(
-        _getCoreList('/cartera/demo/historial'),
-      );
-      final portfolio = rows.map(_clientFromCoreCartera).toList()
-        ..sort((a, b) {
-          final statusCompare = _visitOrder(
-            a.visitStatus,
-          ).compareTo(_visitOrder(b.visitStatus));
-          if (statusCompare != 0) return statusCompare;
-          return b.priorityScore.compareTo(a.priorityScore);
-        });
-      return SalesDashboardData(
-        advisor: _advisorFromSession('asesor0001@bancofalabella.local'),
-        portfolio: portfolio,
-        agencies: const [],
-        advisors: const [],
-        kpis: [
-          {
-            'agencia': 'Core FastAPI 8003',
-            'visitas_totales': portfolio.length,
-            'desembolsos': portfolio
-                .where((client) => client.status == 'desembolsado')
-                .length,
-            'monto_desembolsado': portfolio.fold<num>(
-              0,
-              (sum, client) => sum + client.approvedAmount,
-            ),
-            'mora_30_pct': 0,
-            'tasa_conversion_pct': portfolio.isEmpty ? 0 : 100,
-          },
-        ],
-        history: history,
-        requests: requests.isEmpty
-            ? portfolio
-                  .map(
-                    (client) => {
-                      'numero_expediente': _text(
-                        client.credit,
-                        'numero_expediente',
-                        fallback: client.id,
-                      ),
-                      'cliente_nombre': client.fullName,
-                      'estado': client.status,
-                      'monto_solicitado': client.hypothesisAmount,
-                      'monto_aprobado': client.approvedAmount,
-                      'plazo_meses': _number(
-                        client.credit,
-                        'plazo_meses',
-                        fallback: 12,
-                      ),
-                      'created_at': DateTime.now().toIso8601String(),
-                    },
-                  )
-                  .toList()
-            : requests,
-        bureau: const [],
-        alerts: const [],
-        collections: const [],
-        pendingSync: 0,
-        lastSyncLabel: 'core ${_timeLabel(DateTime.now())}',
-        role: 'Operador',
-        online: true,
-        isDemo: false,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  PreapprovedClient _clientFromCoreCartera(Map<String, dynamic> row) {
-    final document = _text(row, 'documento', fallback: '00000000');
-    final clienteId = _text(row, 'cliente_id', fallback: 'core-cliente');
-    final fullName = _text(row, 'cliente_nombre', fallback: 'Cliente Core');
-    final parts = fullName.split(' ');
-    final name = parts.isEmpty ? fullName : parts.first;
-    final lastName = parts.length <= 1 ? '' : parts.skip(1).join(' ');
-    final amount = _number(row, 'monto_credito');
-    final priorityScore = _number(row, 'score_prioridad', fallback: 40);
-    final visitStatus = _visitStatus(row);
-    final segment = amount >= 8000
-        ? 'PREMIER'
-        : (amount >= 3000 ? 'ESTANDAR' : 'BASICO');
-    return PreapprovedClient(
-      credit: {
-        'id': _text(row, 'id', fallback: clienteId),
-        'user_id': clienteId,
-        'score_id': '$clienteId-core-score',
-        'numero_expediente': _text(
-          row,
-          'numero_expediente',
-          fallback: _text(row, 'id', fallback: clienteId),
-        ),
-        'segmento': segment,
-        'score_transaccional': 500 + priorityScore,
-        'score_campo': 0,
-        'score_final': 500 + priorityScore,
-        'monto_hipotesis': amount,
-        'monto_aprobado': amount,
-        'plazo_meses': 12,
-        'cuota_mensual': amount * paymentFactor(0.4392, 12),
-        'estado': 'enviado',
-        'fecha_preaprobacion': DateTime.now().toIso8601String(),
-        'dias_mora': 0,
-        'estado_pago': 'al_dia',
-      },
-      profile: {
-        'user_id': clienteId,
-        'nombres': name,
-        'apellidos': lastName,
-        'dni': document,
-        'telefono': '',
-        'distrito': 'Por visitar',
-        'departamento': 'Junin',
-        'tipo_negocio': 'Microempresa',
-        'nombre_negocio': 'Negocio de $name',
-        'direccion_negocio': 'Direccion pendiente',
-        'lat_negocio': _number(row, 'lat', fallback: -12.065),
-        'lng_negocio': _number(row, 'lng', fallback: -75.205),
-        'antiguedad_negocio_meses': 48,
-        'tenencia_local': 'alquilado_con_contrato',
-        'num_entidades_sbs': 1,
-        'calificacion_sbs': 'Normal',
-      },
-      score: {
-        'id': '$clienteId-core-score',
-        'user_id': clienteId,
-        'score_transaccional': 500 + priorityScore,
-        'segmento_preliminar': segment,
-        'monto_hipotesis': amount,
-        'ingreso_promedio_ref': 3000,
-        'cuota_max_ref': 900,
-      },
-      fieldFile: const {},
-      assignment: {
-        'id': _text(row, 'id'),
-        'source': 'core',
-        'cliente_user_id': clienteId,
-        'tipo_gestion': _text(row, 'tipo_gestion', fallback: 'NUEVA_SOLICITUD'),
-        'prioridad': _text(row, 'prioridad', fallback: 'normal'),
-        'score_prioridad': priorityScore,
-        'estado_visita': visitStatus,
-        'fecha_asignacion': DateTime.now().toIso8601String(),
-      },
-    );
   }
 
   Future<void> submitFieldFile({
@@ -737,27 +555,6 @@ class ScoringRepository {
     required String advisorName,
     required String agency,
   }) async {
-    if (_text(client.assignment, 'source') == 'core') {
-      final assignmentId = _text(client.assignment, 'id');
-      if (assignmentId.isEmpty) return;
-      await _postCore('/cartera/demo/$assignmentId/comite', {
-        'asesor_nombre': advisorName,
-        'agencia': agency,
-        'score_transaccional': client.scoreValue.toInt(),
-        'score_campo': result.scoreCampo,
-        'score_final': result.scoreFinal,
-        'segmento': result.segment,
-        'monto_propuesto': result.disqualified
-            ? 0
-            : min(input.montoPropuesto.toDouble(), result.maxAmount),
-        'plazo_meses': input.plazoMeses,
-        'cuota_estimada': result.payment,
-        'recomendacion': result.disqualified ? 'rechazar' : input.recomendacion,
-        'observaciones': input.observaciones,
-      });
-      return;
-    }
-
     if (!SupabaseConfig.isConfigured) return;
 
     final supabase = Supabase.instance.client;
@@ -837,7 +634,7 @@ class ScoringRepository {
     required double longitude,
     required String address,
   }) async {
-    if (!SupabaseConfig.isConfigured || client.isRouteDemoDestination) {
+    if (!SupabaseConfig.isConfigured || client.isRouteReferenceDestination) {
       return false;
     }
     final supabase = Supabase.instance.client;
@@ -861,18 +658,6 @@ class ScoringRepository {
     required String result,
     required String observation,
   }) async {
-    if (_text(client.assignment, 'source') == 'core') {
-      final assignmentId = _text(client.assignment, 'id');
-      if (assignmentId.isEmpty) return;
-      await _postCore('/cartera/demo/$assignmentId/visita', {
-        'resultado': result,
-        'observacion': observation,
-        'lat': client.lat,
-        'lng': client.lng,
-      });
-      return;
-    }
-
     if (!SupabaseConfig.isConfigured) return;
     final supabase = Supabase.instance.client;
     final assignmentId = _text(client.assignment, 'id');
@@ -901,36 +686,6 @@ class ScoringRepository {
     required String signature,
   }) async {
     final factor = paymentFactor(0.60, term);
-    if (_text(client.assignment, 'source') == 'core') {
-      await _postCore('/cliente/solicitudes', {
-        'numero_documento': _text(client.profile, 'dni', fallback: '00000000'),
-        'nombres': _text(client.profile, 'nombres', fallback: 'Cliente'),
-        'apellidos': _text(
-          client.profile,
-          'apellidos',
-          fallback: 'Banco Falabella',
-        ),
-        'telefono': _text(client.profile, 'telefono', fallback: '999000000'),
-        'tipo_negocio': client.business,
-        'nombre_negocio': _text(client.profile, 'nombre_negocio'),
-        'ingresos_estimados': _number(
-          client.score,
-          'ingreso_promedio_ref',
-          fallback: 3000,
-        ),
-        'monto_solicitado': amount,
-        'plazo_meses': term,
-        'moneda': 'PEN',
-        'tipo_cuota': 'mensual',
-        'garantia': 'sin_garantia',
-        'destino_credito': purpose,
-        'cuota_estimada': amount * factor,
-        'tea_referencial': 0.60,
-        'firma_cliente_base64': signature,
-      });
-      return;
-    }
-
     if (!SupabaseConfig.isConfigured) return;
     final supabase = Supabase.instance.client;
     final now = DateTime.now();
@@ -972,7 +727,9 @@ class ScoringRepository {
     required Uint8List bytes,
     required String extension,
   }) async {
-    if (!SupabaseConfig.isConfigured) return 'demo://$type.$extension';
+    if (!SupabaseConfig.isConfigured) {
+      throw StateError('Supabase no esta configurado para subir documentos.');
+    }
     final supabase = Supabase.instance.client;
     final safeExtension = extension.replaceAll('.', '').toLowerCase();
     final path =
@@ -1066,48 +823,6 @@ class ScoringRepository {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> _getCoreList(String path) async {
-    try {
-      return _asList(await _coreRequest('GET', path));
-    } catch (_) {
-      if (coreBaseUrl == fallbackCoreBaseUrl) rethrow;
-      return _asList(await _coreRequest('GET', path, fallback: true));
-    }
-  }
-
-  static Future<void> _postCore(String path, Map<String, dynamic> body) async {
-    try {
-      await _coreRequest('POST', path, body: body);
-    } catch (_) {
-      if (coreBaseUrl == fallbackCoreBaseUrl) rethrow;
-      await _coreRequest('POST', path, body: body, fallback: true);
-    }
-  }
-
-  static Future<dynamic> _coreRequest(
-    String method,
-    String path, {
-    Map<String, dynamic>? body,
-    bool fallback = false,
-  }) async {
-    final baseUrl = fallback ? fallbackCoreBaseUrl : coreBaseUrl;
-    final uri = Uri.parse('$baseUrl$path');
-    final response = method == 'POST'
-        ? await http
-              .post(
-                uri,
-                headers: const {'Content-Type': 'application/json'},
-                body: jsonEncode(body ?? const <String, dynamic>{}),
-              )
-              .timeout(const Duration(seconds: 8))
-        : await http.get(uri).timeout(const Duration(seconds: 8));
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Core ${response.statusCode}: ${response.body}');
-    }
-    if (response.body.trim().isEmpty) return null;
-    return jsonDecode(response.body);
-  }
-
   static Map<String, Map<String, dynamic>> _latestByUser(
     List<Map<String, dynamic>> rows,
   ) {
@@ -1135,274 +850,6 @@ class ScoringRepository {
   static String _timeLabel(DateTime dateTime) {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
-
-  SalesDashboardData get _demoData {
-    final clients = [
-      _demoClient(
-        id: '44444444-4444-4444-4444-444444444444',
-        name: 'Anaximandro',
-        lastName: 'Quispe',
-        business: 'Bodega',
-        district: 'Huancayo',
-        segment: 'PREMIER',
-        score: 690,
-        finalScore: 845,
-        status: 'desembolsado',
-        amount: 5000,
-        approved: 4200,
-        lat: -12.065,
-        lng: -75.205,
-        hasVisit: true,
-      ),
-      _demoClient(
-        id: '55555555-5555-5555-5555-555555555555',
-        name: 'Eulalia',
-        lastName: 'Mamani',
-        business: 'Restaurante',
-        district: 'El Tambo',
-        segment: 'ESTANDAR',
-        score: 562,
-        finalScore: 0,
-        status: 'preaprobado',
-        amount: 2500,
-        approved: 1800,
-        lat: -12.055,
-        lng: -75.215,
-      ),
-      _demoClient(
-        id: '66666666-6666-6666-6666-666666666666',
-        name: 'Teofilo',
-        lastName: 'Huaman',
-        business: 'Carpinteria',
-        district: 'Chilca',
-        segment: 'BASICO',
-        score: 438,
-        finalScore: 0,
-        status: 'contactado',
-        amount: 1000,
-        approved: 900,
-        lat: -12.078,
-        lng: -75.197,
-      ),
-    ];
-
-    return SalesDashboardData(
-      isDemo: true,
-      advisor: const {
-        'id': 1,
-        'nombre_completo': 'Carlos Ramirez',
-        'email': 'asesor0001@bancofalabella.local',
-        'agencia': 'Agencia Huancayo Centro',
-        'nivel': 'Senior II',
-        'codigo': 'AG-001-01',
-        'perfil': 'Operador',
-      },
-      portfolio: clients,
-      agencies: const [
-        {
-          'codigo': 'AG-001',
-          'nombre': 'Agencia Huancayo Centro',
-          'region': 'Centro',
-          'total_asesores': 12,
-          'meta_creditos_agencia': 117,
-          'meta_monto_agencia': 210600,
-        },
-        {
-          'codigo': 'AG-013',
-          'nombre': 'Agencia Arequipa Centro',
-          'region': 'Sur',
-          'total_asesores': 12,
-          'meta_creditos_agencia': 117,
-          'meta_monto_agencia': 210600,
-        },
-      ],
-      advisors: const [
-        {
-          'codigo': 'AG-001-01',
-          'nombre_completo': 'Carlos Ramirez',
-          'nivel': 'Senior II',
-          'agencia': 'Agencia Huancayo Centro',
-          'creditos_meta': 16,
-          'monto_meta': 28800,
-        },
-        {
-          'codigo': 'AG-001-10',
-          'nombre_completo': 'Ana Flores Poma',
-          'nivel': 'Junior I',
-          'agencia': 'Agencia Huancayo Centro',
-          'creditos_meta': 4,
-          'monto_meta': 7200,
-        },
-      ],
-      kpis: const [
-        {
-          'agencia': 'Agencia Huancayo Centro',
-          'visitas_totales': 60,
-          'desembolsos': 44,
-          'monto_desembolsado': 184800,
-          'mora_30_pct': 3.8,
-          'tasa_conversion_pct': 73.3,
-          'semaforo_mora_30': 'OK',
-        },
-      ],
-      history: const [
-        {
-          'fecha_visita': '2026-05-24',
-          'asesor_nombre': 'Carlos Ramirez',
-          'agencia': 'Agencia Huancayo Centro',
-          'nombre_cliente': 'Anaximandro Quispe',
-          'score_final': 845,
-          'segmento_resultante': 'PREMIER',
-          'recomendacion_asesor': 'aprobar',
-          'estado_ficha': 'completada',
-        },
-      ],
-      requests: const [
-        {
-          'numero_expediente': 'BF-20260526-00001',
-          'estado': 'recibido_comite',
-          'monto_solicitado': 4200,
-          'plazo_meses': 12,
-          'cuota_estimada': 475.50,
-          'created_at': '2026-05-26',
-        },
-        {
-          'numero_expediente': 'BF-20260526-00002',
-          'estado': 'borrador',
-          'monto_solicitado': 1800,
-          'plazo_meses': 6,
-          'cuota_estimada': 338.20,
-          'created_at': '2026-05-26',
-        },
-      ],
-      bureau: const [
-        {
-          'dni_consultado': '40118120',
-          'calificacion_sbs': 'Normal',
-          'entidades_con_deuda': 1,
-          'deuda_total_pen': 2500,
-          'dias_mayor_mora': 0,
-        },
-      ],
-      alerts: const [
-        {
-          'tipo_alerta': 'primer_dia_mora',
-          'mensaje': 'Revisar compromiso de pago de cliente con atraso leve.',
-          'leida': false,
-        },
-      ],
-      collections: const [
-        {
-          'resultado': 'compromiso_pago',
-          'monto_compromiso': 350,
-          'fecha_compromiso': '2026-05-30',
-          'observaciones': 'Cliente confirma pago por Yape.',
-        },
-      ],
-      pendingSync: 1,
-      lastSyncLabel: 'hoy 22:03',
-      role: 'Operador',
-      online: true,
-    );
-  }
-
-  PreapprovedClient _demoClient({
-    required String id,
-    required String name,
-    required String lastName,
-    required String business,
-    required String district,
-    required String segment,
-    required int score,
-    required int finalScore,
-    required String status,
-    required num amount,
-    required num approved,
-    required num lat,
-    required num lng,
-    bool hasVisit = false,
-  }) {
-    final userId = '$id-user';
-    return PreapprovedClient(
-      credit: {
-        'id': id,
-        'user_id': userId,
-        'score_id': '$id-score',
-        'segmento': segment,
-        'score_transaccional': score,
-        'score_campo': hasVisit ? finalScore - score : 0,
-        'score_final': finalScore == 0 ? score : finalScore,
-        'monto_hipotesis': amount,
-        'monto_aprobado': approved,
-        'plazo_meses': 12,
-        'cuota_mensual': 475.5,
-        'estado': status,
-        'fecha_preaprobacion': '2026-05-24',
-        'dias_mora': 0,
-        'estado_pago': 'al_dia',
-      },
-      profile: {
-        'user_id': userId,
-        'nombres': name,
-        'apellidos': lastName,
-        'dni': id.startsWith('4444')
-            ? '40118120'
-            : id.startsWith('5555')
-                ? '41223341'
-                : '42330336',
-        'telefono': '999888777',
-        'distrito': district,
-        'departamento': 'Junin',
-        'tipo_negocio': business,
-        'nombre_negocio': '$business $name',
-        'direccion_negocio': 'Jr. Real 123',
-        'lat_negocio': lat,
-        'lng_negocio': lng,
-        'antiguedad_negocio_meses': 42,
-        'tenencia_local': 'alquilado_con_contrato',
-        'num_entidades_sbs': 1,
-        'calificacion_sbs': 'Normal',
-      },
-      score: {
-        'id': '$id-score',
-        'user_id': userId,
-        'pts_saldo': 160,
-        'pts_regularidad': 128,
-        'pts_disciplina': 120,
-        'pts_vinculo': 160,
-        'pts_riesgo': 90,
-        'score_transaccional': score,
-        'segmento_preliminar': segment,
-        'monto_hipotesis': amount,
-        'ingreso_promedio_ref': 3600,
-        'cuota_max_ref': 1080,
-      },
-      fieldFile: hasVisit
-          ? {
-              'asesor_nombre': 'Carlos Ramirez',
-              'agencia': 'Agencia Huancayo Centro',
-              'fecha_visita': '2026-05-24',
-              'negocio_verificado': true,
-              'score_campo': finalScore - score,
-              'score_final': finalScore,
-              'segmento_resultante': segment,
-              'recomendacion_asesor': 'aprobar',
-              'estado_ficha': 'completada',
-            }
-          : const {},
-      assignment: {
-        'id': '$id-assignment',
-        'cliente_user_id': userId,
-        'tipo_gestion': hasVisit
-            ? 'SEGUIMIENTO'
-            : (segment == 'PREMIER' ? 'AMPLIACION' : 'NUEVA_SOLICITUD'),
-        'prioridad': segment == 'PREMIER' ? 'alta' : 'media',
-        'score_prioridad': segment == 'PREMIER' ? 88 : 64,
-        'estado_visita': hasVisit ? 'visitado' : 'pendiente',
-        'fecha_asignacion': '2026-05-26',
-      },
-    );
-  }
 }
 
 String _text(Map<String, dynamic> map, String key, {String fallback = ''}) {
@@ -1411,19 +858,6 @@ String _text(Map<String, dynamic> map, String key, {String fallback = ''}) {
   final text = value.toString().trim();
   return text.isEmpty ? fallback : text;
 }
-
-String _visitStatus(Map<String, dynamic> row) {
-  final raw = _text(
-    row,
-    'estado_visita',
-    fallback: 'pendiente',
-  ).toLowerCase().replaceAll(' ', '_');
-  if (raw.contains('pend')) return 'pendiente';
-  if (raw.contains('visit')) return 'visitado';
-  return raw.isEmpty ? 'pendiente' : raw;
-}
-
-int _visitOrder(String status) => status == 'pendiente' ? 0 : 1;
 
 num _number(Map<String, dynamic> map, String key, {num fallback = 0}) {
   final value = map[key];
