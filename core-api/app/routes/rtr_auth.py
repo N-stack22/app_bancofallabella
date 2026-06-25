@@ -8,7 +8,14 @@ router = APIRouter()
 
 @router.post("/login", response_model=TokenOut)
 def login(data: LoginIn, db: Session = Depends(get_db)):
-    result = ctl_auth.login(db, data.codigo_empleado, data.password)
+    try:
+        result = ctl_auth.login(db, data.codigo_empleado, data.password)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo validar el codigo en el Core publicado.",
+        )
     if result and result.get("_bloqueado"):
         raise HTTPException(
             status_code=423,

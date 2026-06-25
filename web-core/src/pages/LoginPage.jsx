@@ -45,7 +45,7 @@ export default function LoginPage() {
     e.preventDefault()
     setError(null)
     if (!codigo.trim() || !password) {
-      setError('Ingresa tu DNI y contrasena.')
+      setError('Ingresa tu codigo y contrasena.')
       return
     }
     setLoading(true)
@@ -109,13 +109,13 @@ export default function LoginPage() {
             <ShieldCheck size={15} /> Acceso seguro del personal
           </span>
           <h2>Bienvenida</h2>
-          <p className="cm-auth-lead">Ingresa con tu DNI o codigo autorizado.</p>
+          <p className="cm-auth-lead">Ingresa con tu codigo autorizado.</p>
 
           <Alert tipo="error">{error}</Alert>
 
           <form onSubmit={onSubmit}>
             <div className="cm-field">
-              <label htmlFor="codigo">DNI o codigo</label>
+              <label htmlFor="codigo">Codigo</label>
               <div className="cm-input-wrap">
                 <User size={18} />
                 <input

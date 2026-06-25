@@ -9,7 +9,15 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    stored = (hashed or "").strip()
+    if not stored:
+        return False
+    try:
+        return pwd_context.verify(plain, stored)
+    except Exception:
+        # Compatibilidad con cargas academicas antiguas que dejaron la clave
+        # en texto plano en la columna password_hash.
+        return plain == stored
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
