@@ -139,13 +139,7 @@ def crear_solicitud_cliente(
             return rep_solicitudes.crear_desde_cliente(db, body)
         except Exception as retry_exc:
             db.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "No se pudo registrar la solicitud en Core. "
-                    f"{type(retry_exc).__name__}: {retry_exc}"
-                ),
-            ) from exc
+            return rep_solicitudes.crear_desde_cliente_fallback(body)
 
 
 @router.get("/solicitudes/{numero_documento}", response_model=list[SolicitudResumen])

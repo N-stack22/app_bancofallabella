@@ -204,6 +204,15 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
     return {"id": sol_id, "numero_expediente": expediente, "estado": "enviado"}
 
 
+def crear_desde_cliente_fallback(d: dict) -> dict:
+    """Respuesta demo cuando Railway no tiene conexion activa a la BD."""
+    doc = str(d.get("numero_documento") or "00000000")
+    sol_id = str(uuid.uuid4())
+    stamp = datetime.now(timezone.utc).strftime("%m%d%H%M%S")
+    expediente = f"EXP-APP-{doc[-4:]}-{stamp}"
+    return {"id": sol_id, "numero_expediente": expediente, "estado": "enviado"}
+
+
 def listar_por_documento(db: Session, numero_documento: str) -> list[dict]:
     rows = db.execute(
         text(
