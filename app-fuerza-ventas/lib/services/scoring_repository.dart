@@ -443,7 +443,7 @@ class ScoringRepository {
     try {
       final baseRows = await Future.wait<dynamic>([
         client.from('agencias').select().limit(50),
-        client.from('asesores').select().limit(250),
+        client.from('asesores').select().limit(1000),
       ]);
       final rawAgencies = _asList(baseRows[0]);
       final rawAdvisors = _asList(baseRows[1]);
@@ -453,6 +453,11 @@ class ScoringRepository {
         advisors: rawAdvisors,
         agenciesById: agencyById,
       );
+      if (_text(advisor, 'id').isEmpty) {
+        throw StateError(
+          'No se encontro el asesor ${client.auth.currentUser?.email ?? ''} en la tabla asesores.',
+        );
+      }
       final advisorId = _text(advisor, 'id');
 
       final portfolioBundle = await _loadPortfolioFromCoreSchema(
@@ -879,7 +884,6 @@ class ScoringRepository {
         }
       }
     }
-    if (row.isEmpty && advisors.isNotEmpty) row = advisors.first;
     final agency = agenciesById[_text(row, 'agencia_id')] ?? const {};
     return _advisorFromCoreSchema(row: row, agency: agency, email: email);
   }
