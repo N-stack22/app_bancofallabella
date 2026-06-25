@@ -16,7 +16,7 @@ from app.schemas.sch_cliente import (
 )
 from app.schemas.sch_solicitudes import SolicitudIn, SolicitudCreada, SolicitudResumen
 from app.controllers import ctl_auth_cliente
-from app.repositories import rep_cliente, rep_solicitudes
+from app.repositories import rep_casos, rep_cliente, rep_solicitudes
 
 router = APIRouter()
 
@@ -129,7 +129,23 @@ def crear_solicitud_cliente(
     db: Session = Depends(get_db),
 ):
     """Registra una solicitud desde la App Clientes y la asigna a cartera."""
-    return rep_solicitudes.crear_desde_cliente(db, data.model_dump())
+    body = data.model_dump()
+    try:
+        return rep_solicitudes.crear_desde_cliente(db, body)
+    except Exception as exc:
+        db.rollback()
+        try:
+            rep_casos.sembrar(db)
+            return rep_solicitudes.crear_desde_cliente(db, body)
+        except Exception as retry_exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "No se pudo registrar la solicitud en Core. "
+                    f"{type(retry_exc).__name__}: {retry_exc}"
+                ),
+            ) from exc
 
 
 @router.get("/solicitudes/{numero_documento}", response_model=list[SolicitudResumen])

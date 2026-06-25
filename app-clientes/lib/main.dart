@@ -545,6 +545,7 @@ class CoreApiClient {
       _summaryCache.clear();
       return result;
     } catch (_) {
+      if (fallbackCoreBaseUrl == primaryCoreBaseUrl) rethrow;
       final result = await _postApplication(fallbackCoreBaseUrl, body);
       _summaryCache.clear();
       return result;
@@ -1858,7 +1859,7 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('No se pudo conectar al Core: $error'),
+          content: Text('No se pudo registrar la solicitud en Core: $error'),
           backgroundColor: AppColors.red,
         ),
       );
