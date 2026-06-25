@@ -489,7 +489,10 @@ class ScoringRepository {
             .limit(20),
         client.from('sync_outbox').select().eq('estado', 'pendiente').limit(50),
       ]);
-      final requests = _asList(rows[0]);
+      final requests = await _enrichRequestsWithClients(
+        client,
+        _asList(rows[0]),
+      );
       final bureau = _asList(rows[1]);
       final alerts = _asList(rows[2]);
       final collections = _asList(rows[3]);
@@ -1240,6 +1243,32 @@ class ScoringRepository {
     } catch (_) {
       return const <Map<String, dynamic>>[];
     }
+  }
+
+  static Future<List<Map<String, dynamic>>> _enrichRequestsWithClients(
+    SupabaseClient supabase,
+    List<Map<String, dynamic>> requests,
+  ) async {
+    final clientIds = _ids(requests, 'cliente_id');
+    if (clientIds.isEmpty) return requests;
+
+    final clients = await _optionalList(
+      supabase
+          .from('clientes')
+          .select('id,numero_documento,nombres,apellidos')
+          .inFilter('id', clientIds),
+    );
+    final clientsById = _indexBy(clients, 'id');
+    return requests.map((request) {
+      final client = clientsById[_text(request, 'cliente_id')] ?? const {};
+      final fullName =
+          '${_text(client, 'nombres')} ${_text(client, 'apellidos')}'.trim();
+      return {
+        ...request,
+        'cliente_nombre': fullName,
+        'cliente_documento': _text(client, 'numero_documento'),
+      };
+    }).toList();
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {

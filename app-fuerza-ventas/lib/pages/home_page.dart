@@ -1279,23 +1279,26 @@ class _TrackingTab extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           _SectionTitle('Transmision electronica'),
-          ...data.requests
-              .take(6)
-              .map(
-                (request) => _DataTile(
-                  icon: Icons.cloud_upload,
-                  title: _text(
-                    request,
-                    'numero_expediente',
-                    fallback: 'Expediente sin numero',
+          if (data.requests.isEmpty)
+            const _StateMessage(
+              icon: Icons.cloud_off,
+              title: 'Sin solicitudes recibidas',
+              message:
+                  'Las solicitudes enviadas desde clientes apareceran aqui.',
+            )
+          else
+            ...data.requests
+                .take(8)
+                .map(
+                  (request) => _DataTile(
+                    icon: Icons.cloud_upload,
+                    title: _requestTitle(request),
+                    subtitle: _requestSubtitle(request),
+                    trailing:
+                        '${_number(request, 'plazo_meses').toStringAsFixed(0)}m',
+                    color: _AppColors.blue,
                   ),
-                  subtitle:
-                      '${_pretty(_text(request, 'estado'))} - ${_money(_number(request, 'monto_solicitado'))}',
-                  trailing:
-                      '${_number(request, 'plazo_meses').toStringAsFixed(0)}m',
-                  color: _AppColors.blue,
                 ),
-              ),
           OutlinedButton.icon(
             onPressed: data.requests.isEmpty
                 ? null
@@ -2957,4 +2960,25 @@ String _money(num value) {
 String _pretty(String value) {
   if (value.isEmpty) return '-';
   return value.replaceAll('_', ' ').toUpperCase();
+}
+
+String _requestTitle(Map<String, dynamic> request) {
+  final expediente = _text(
+    request,
+    'numero_expediente',
+    fallback: 'Expediente sin numero',
+  );
+  final clientName = _text(request, 'cliente_nombre');
+  return clientName.isEmpty ? expediente : '$expediente - $clientName';
+}
+
+String _requestSubtitle(Map<String, dynamic> request) {
+  final parts = [
+    _pretty(_text(request, 'estado')),
+    _pretty(_text(request, 'canal', fallback: 'cliente')),
+    _money(_number(request, 'monto_solicitado')),
+  ];
+  final document = _text(request, 'cliente_documento');
+  if (document.isNotEmpty) parts.add('DNI $document');
+  return parts.join(' - ');
 }
