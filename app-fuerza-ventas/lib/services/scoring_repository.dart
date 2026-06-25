@@ -393,19 +393,39 @@ class FieldScoringResult {
 }
 
 class ScoringRepository {
-  Future<SalesDashboardData> loadDashboard({bool forceDemo = false}) async {
+  SalesDashboardData? _cachedDashboard;
+  DateTime? _cachedAt;
+
+  Future<SalesDashboardData> loadDashboard({
+    bool forceDemo = false,
+    bool forceRefresh = false,
+  }) async {
+    final now = DateTime.now();
+    if (!forceRefresh &&
+        _cachedDashboard != null &&
+        _cachedAt != null &&
+        now.difference(_cachedAt!).inSeconds < 25) {
+      return _cachedDashboard!;
+    }
+
+    SalesDashboardData remember(SalesDashboardData data) {
+      _cachedDashboard = data;
+      _cachedAt = DateTime.now();
+      return data;
+    }
+
     if (!forceDemo) {
       final coreData = await _tryLoadCoreDashboard();
-      if (coreData != null) return coreData;
+      if (coreData != null) return remember(coreData);
     }
 
     if (forceDemo || !SupabaseConfig.isConfigured) {
-      return _demoData;
+      return remember(_demoData);
     }
 
     final client = Supabase.instance.client;
     final currentUserId = client.auth.currentUser?.id;
-    if (currentUserId == null) return _demoData;
+    if (currentUserId == null) return remember(_demoData);
 
     try {
       final results = await Future.wait<dynamic>([
@@ -521,37 +541,39 @@ class ScoringRepository {
             .limit(50),
       );
 
-      return SalesDashboardData(
-        advisor: {
-          ..._advisorFromSession(client.auth.currentUser?.email),
-          'perfil': roleRows.isEmpty
+      return remember(
+        SalesDashboardData(
+          advisor: {
+            ..._advisorFromSession(client.auth.currentUser?.email),
+            'perfil': roleRows.isEmpty
+                ? 'Operador'
+                : _text(roleRows.first, 'perfil', fallback: 'Operador'),
+            'id': roleRows.isEmpty
+                ? 1
+                : _number(roleRows.first, 'asesor_id', fallback: 1).toInt(),
+          },
+          portfolio: portfolio,
+          agencies: _asList(results[1]),
+          advisors: _asList(results[2]),
+          kpis: _asList(results[3]),
+          history: _asList(results[4]),
+          requests: requests,
+          bureau: bureau,
+          alerts: alerts,
+          collections: collections,
+          pendingSync:
+              pendingRows.length +
+              requests.where((item) => item['pendiente_sync'] == true).length,
+          lastSyncLabel: 'hoy ${_timeLabel(DateTime.now())}',
+          role: roleRows.isEmpty
               ? 'Operador'
               : _text(roleRows.first, 'perfil', fallback: 'Operador'),
-          'id': roleRows.isEmpty
-              ? 1
-              : _number(roleRows.first, 'asesor_id', fallback: 1).toInt(),
-        },
-        portfolio: portfolio,
-        agencies: _asList(results[1]),
-        advisors: _asList(results[2]),
-        kpis: _asList(results[3]),
-        history: _asList(results[4]),
-        requests: requests,
-        bureau: bureau,
-        alerts: alerts,
-        collections: collections,
-        pendingSync:
-            pendingRows.length +
-            requests.where((item) => item['pendiente_sync'] == true).length,
-        lastSyncLabel: 'hoy ${_timeLabel(DateTime.now())}',
-        role: roleRows.isEmpty
-            ? 'Operador'
-            : _text(roleRows.first, 'perfil', fallback: 'Operador'),
-        online: true,
-        isDemo: false,
+          online: true,
+          isDemo: false,
+        ),
       );
     } catch (_) {
-      return _demoData;
+      return remember(_demoData);
     }
   }
 

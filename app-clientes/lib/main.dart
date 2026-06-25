@@ -177,6 +177,13 @@ final demoProducts = BankProducts(
   ],
 );
 
+class _SummaryCacheEntry {
+  const _SummaryCacheEntry(this.data, this.createdAt);
+
+  final Map<String, dynamic> data;
+  final DateTime createdAt;
+}
+
 class UserProfile {
   const UserProfile({
     required this.name,
@@ -525,14 +532,20 @@ class CreditApplicationResult {
 class CoreApiClient {
   const CoreApiClient();
 
+  static final Map<String, _SummaryCacheEntry> _summaryCache = {};
+
   Future<CreditApplicationResult> submitApplication(
     CreditApplicationData data,
   ) async {
     final body = jsonEncode(data.toJson());
     try {
-      return await _postApplication(primaryCoreBaseUrl, body);
+      final result = await _postApplication(primaryCoreBaseUrl, body);
+      _summaryCache.clear();
+      return result;
     } catch (_) {
-      return await _postApplication(fallbackCoreBaseUrl, body);
+      final result = await _postApplication(fallbackCoreBaseUrl, body);
+      _summaryCache.clear();
+      return result;
     }
   }
 
@@ -557,10 +570,20 @@ class CoreApiClient {
   }
 
   Future<Map<String, dynamic>> loadCustomerSummary(String document) async {
+    final key = document.trim();
+    final cached = _summaryCache[key];
+    if (cached != null &&
+        DateTime.now().difference(cached.createdAt).inSeconds < 8) {
+      return cached.data;
+    }
     try {
-      return await _getSummary(primaryCoreBaseUrl, document);
+      final data = await _getSummary(primaryCoreBaseUrl, document);
+      _summaryCache[key] = _SummaryCacheEntry(data, DateTime.now());
+      return data;
     } catch (_) {
-      return await _getSummary(fallbackCoreBaseUrl, document);
+      final data = await _getSummary(fallbackCoreBaseUrl, document);
+      _summaryCache[key] = _SummaryCacheEntry(data, DateTime.now());
+      return data;
     }
   }
 
@@ -585,6 +608,7 @@ class CoreApiClient {
     } catch (_) {
       await _postOperation(fallbackCoreBaseUrl, token, body);
     }
+    _summaryCache.clear();
   }
 
   Future<List<Map<String, dynamic>>> _getCases(String baseUrl) async {
@@ -1160,12 +1184,12 @@ class _ClientShellState extends State<ClientShell> {
           NavigationDestination(
             icon: Icon(Icons.savings_outlined),
             selectedIcon: Icon(Icons.savings),
-            label: 'Ahorros',
+            label: 'Cuenta',
           ),
           NavigationDestination(
             icon: Icon(Icons.payments_outlined),
             selectedIcon: Icon(Icons.payments),
-            label: 'Creditos',
+            label: 'Credito',
           ),
           NavigationDestination(
             icon: Icon(Icons.swap_horiz),

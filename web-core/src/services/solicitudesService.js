@@ -11,18 +11,9 @@ export async function listarSolicitudes() {
     try {
       return await cachedGet('/solicitudes/demo', {}, 45000)
     } catch (_) {
-      // Sin Core/autenticacion: deja visible el catalogo del PDF como respaldo.
+      // Si Core no responde, mantenemos el modulo limpio y no mezclamos casos PDF.
     }
-    const casos = await cachedGet('/casos', {}, 60000)
-    return casos.map((c) => ({
-      id: c.numero_expediente,
-      numero_expediente: c.numero_expediente,
-      cliente_nombre: `${c.nombres} ${c.apellidos}`,
-      monto_solicitado: c.monto_solicitado,
-      monto_aprobado: c.monto_aprobado,
-      estado: c.estado_final,
-      created_at: '2026-06-17',
-    }))
+    return []
   }
 }
 

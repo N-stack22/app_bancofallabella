@@ -21,49 +21,49 @@ def primer_asesor_activo(db: Session) -> str | None:
 
 def listar_por_asesor(db: Session, asesor_id: str, fecha: date) -> list[dict]:
     """Cartera del asesor para una fecha, ordenada por score (RF-09)."""
-    filas = (
-        db.query(CarteraDiaria, Cliente)
-        .join(Cliente, Cliente.id == CarteraDiaria.cliente_id)
-        .filter(
-            CarteraDiaria.asesor_id == asesor_id,
-            CarteraDiaria.fecha_asignacion == fecha,
-        )
-        .order_by(desc(CarteraDiaria.score_prioridad))
-        .all()
-    )
-    resultado = []
-    for c, cli in filas:
-        solicitud = db.execute(
-            text(
-                """SELECT numero_expediente, created_at
+    filas = db.execute(
+        text(
+            """SELECT c.id, c.cliente_id, c.tipo_gestion, c.prioridad,
+                      c.score_prioridad, c.monto_credito, c.estado_visita,
+                      c.orden_manual, c.fecha_asignacion, c.timestamp_visita,
+                      cli.nombres, cli.apellidos, cli.numero_documento,
+                      cli.lat, cli.lng, s.numero_expediente, s.created_at
+               FROM cartera_diaria c
+               JOIN clientes cli ON cli.id = c.cliente_id
+               LEFT JOIN LATERAL (
+                   SELECT numero_expediente, created_at
                    FROM solicitudes_credito
-                   WHERE cliente_id = :cliente_id
+                   WHERE cliente_id = c.cliente_id
                    ORDER BY created_at DESC
-                   LIMIT 1"""
-            ),
-            {"cliente_id": str(c.cliente_id)},
-        ).mappings().first()
-        resultado.append(
-            {
-            "id": str(c.id),
-            "cliente_id": str(c.cliente_id),
-            "cliente_nombre": f"{cli.nombres} {cli.apellidos}",
-            "documento": cli.numero_documento,
-            "numero_expediente": solicitud["numero_expediente"] if solicitud else None,
-            "tipo_gestion": c.tipo_gestion,
-            "prioridad": c.prioridad,
-            "score_prioridad": c.score_prioridad or 0,
-            "monto_credito": float(c.monto_credito or 0),
-            "estado_visita": c.estado_visita,
-            "orden_manual": c.orden_manual,
-            "fecha_asignacion": c.fecha_asignacion.isoformat() if c.fecha_asignacion else None,
-            "fecha_hora_solicitud": solicitud["created_at"].isoformat() if solicitud and solicitud["created_at"] else None,
-            "timestamp_visita": c.timestamp_visita.isoformat() if c.timestamp_visita else None,
-            "lat": float(cli.lat) if cli.lat is not None else None,
-            "lng": float(cli.lng) if cli.lng is not None else None,
+                   LIMIT 1
+               ) s ON TRUE
+               WHERE c.asesor_id = :asesor_id
+                 AND c.fecha_asignacion = :fecha
+               ORDER BY c.score_prioridad DESC NULLS LAST"""
+        ),
+        {"asesor_id": asesor_id, "fecha": fecha},
+    ).mappings().all()
+    return [
+        {
+            "id": str(r["id"]),
+            "cliente_id": str(r["cliente_id"]),
+            "cliente_nombre": f"{r['nombres']} {r['apellidos']}",
+            "documento": r["numero_documento"],
+            "numero_expediente": r["numero_expediente"],
+            "tipo_gestion": r["tipo_gestion"],
+            "prioridad": r["prioridad"],
+            "score_prioridad": r["score_prioridad"] or 0,
+            "monto_credito": float(r["monto_credito"] or 0),
+            "estado_visita": r["estado_visita"],
+            "orden_manual": r["orden_manual"],
+            "fecha_asignacion": r["fecha_asignacion"].isoformat() if r["fecha_asignacion"] else None,
+            "fecha_hora_solicitud": r["created_at"].isoformat() if r["created_at"] else None,
+            "timestamp_visita": r["timestamp_visita"].isoformat() if r["timestamp_visita"] else None,
+            "lat": float(r["lat"]) if r["lat"] is not None else None,
+            "lng": float(r["lng"]) if r["lng"] is not None else None,
         }
-        )
-    return resultado
+        for r in filas
+    ]
 
 def marcar_visita(db: Session, asesor_id: str, cartera_id: str, data: dict) -> bool:
     fila = (

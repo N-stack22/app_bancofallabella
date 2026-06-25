@@ -181,7 +181,7 @@ class _HomePageState extends State<HomePage> {
             NavigationDestination(
               icon: Icon(Icons.list_alt_outlined),
               selectedIcon: Icon(Icons.list_alt),
-              label: 'Cartera',
+              label: 'Clientes',
             ),
             NavigationDestination(
               icon: Icon(Icons.route_outlined),
@@ -191,7 +191,7 @@ class _HomePageState extends State<HomePage> {
             NavigationDestination(
               icon: Icon(Icons.assignment_outlined),
               selectedIcon: Icon(Icons.assignment),
-              label: 'Ficha',
+              label: 'Evaluar',
             ),
             NavigationDestination(
               icon: Icon(Icons.request_page_outlined),
@@ -201,7 +201,7 @@ class _HomePageState extends State<HomePage> {
             NavigationDestination(
               icon: Icon(Icons.rule_outlined),
               selectedIcon: Icon(Icons.rule),
-              label: 'Estados',
+              label: 'Comite',
             ),
             NavigationDestination(
               icon: Icon(Icons.dashboard_customize_outlined),

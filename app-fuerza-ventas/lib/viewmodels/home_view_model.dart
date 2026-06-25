@@ -27,7 +27,10 @@ class HomeViewModel extends ChangeNotifier {
   bool _disposed = false;
 
   Future<void> refresh() async {
-    dashboardFuture = repository.loadDashboard(forceDemo: demoMode);
+    dashboardFuture = repository.loadDashboard(
+      forceDemo: demoMode,
+      forceRefresh: true,
+    );
     notifyListeners();
   }
 

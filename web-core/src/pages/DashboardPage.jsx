@@ -17,13 +17,19 @@ import { diagnosticoConexion, resumenCasos } from '../services/casosService.js'
 import { extractError, formatDateTime } from '../utils/format.js'
 
 const ACCESOS = [
-  { to: '/cartera', icon: Briefcase, color: '#007a3d', t: 'Cartera del dia', d: 'Clientes asignados para visitar hoy' },
-  { to: '/solicitudes/nueva', icon: PlusCircle, color: '#0f766e', t: 'Nueva solicitud', d: 'Registrar credito empresarial digital' },
-  { to: '/evaluacion', icon: ShieldCheck, color: '#2563eb', t: 'Pre-evaluar / Buro', d: 'Capacidad de pago y listas' },
-  { to: '/cobranza', icon: HandCoins, color: '#f59e0b', t: 'Cobranza', d: 'Gestion de mora y compromiso' },
-  { to: '/solicitudes', icon: FileText, color: '#004f2a', t: 'Expedientes', d: 'Estado, comite y desembolso' },
+  { to: '/cartera', icon: Briefcase, color: '#007a3d', t: 'Clientes asignados', d: 'Prioridad, ficha y visita del dia' },
+  { to: '/solicitudes/nueva', icon: PlusCircle, color: '#0f766e', t: 'Crear solicitud', d: 'Nuevo credito para un cliente real' },
+  { to: '/solicitudes', icon: FileText, color: '#004f2a', t: 'Seguimiento', d: 'Comite, estado y desembolso' },
+  { to: '/evaluacion', icon: ShieldCheck, color: '#2563eb', t: 'Riesgo', d: 'Pre-evaluacion, buro y politicas' },
+  { to: '/cobranza', icon: HandCoins, color: '#b76a00', t: 'Cobranza', d: 'Mora, compromiso y pagos' },
   { to: '/reportes', icon: BarChart3, color: '#168a46', t: 'Reportes', d: 'Productividad y colocacion' },
-  { to: '/casos', icon: Database, color: '#6d5dfc', t: 'Casos PDF', d: 'Sembrar y revisar los 30 casos' },
+]
+
+const FLUJO_ROL = [
+  { icon: Briefcase, title: '1. Identificar cliente', text: 'Revisa cartera y prioridad antes de abrir ficha.' },
+  { icon: ShieldCheck, title: '2. Evaluar riesgo', text: 'Valida buro, capacidad y monto recomendado.' },
+  { icon: FileText, title: '3. Decidir solicitud', text: 'Registra comite y desembolso cuando corresponda.' },
+  { icon: HandCoins, title: '4. Acompanar cartera', text: 'Confirma movimientos, pagos y cobranza.' },
 ]
 
 const PRODUCTOS_BF = [
@@ -161,6 +167,20 @@ export default function DashboardPage() {
                     <h3>{p.t}</h3>
                     <p>{p.d}</p>
                   </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <h2 className="cm-section-title">Flujo por rol</h2>
+          <div className="cm-flow-grid">
+            {FLUJO_ROL.map((step) => {
+              const Icon = step.icon
+              return (
+                <div className="cm-flow-step" key={step.title}>
+                  <span><Icon size={18} /></span>
+                  <strong>{step.title}</strong>
+                  <small>{step.text}</small>
                 </div>
               )
             })}

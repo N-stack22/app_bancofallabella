@@ -11,7 +11,6 @@ import {
   ChevronDown,
   LogOut,
   User,
-  Database,
   Search,
   Bell,
   Menu,
@@ -21,13 +20,12 @@ import { useAuth } from '../../context/AuthContext.jsx'
 import { iniciales, humanizar } from '../../utils/format.js'
 
 export const TABS = [
-  { to: '/inicio', label: 'Inicio', icon: LayoutDashboard },
-  { to: '/cartera', label: 'Cartera', icon: Briefcase },
-  { to: '/solicitudes', label: 'Solicitudes', icon: FileText },
-  { to: '/evaluacion', label: 'Evaluacion', icon: ShieldCheck },
-  { to: '/cobranza', label: 'Cobranza', icon: HandCoins },
-  { to: '/reportes', label: 'Reportes', icon: BarChart3 },
-  { to: '/casos', label: 'Casos PDF', icon: Database },
+  { to: '/inicio', label: 'Inicio', icon: LayoutDashboard, group: 'Panel' },
+  { to: '/cartera', label: 'Clientes', icon: Briefcase, group: 'Atencion' },
+  { to: '/solicitudes', label: 'Solicitudes', icon: FileText, group: 'Atencion' },
+  { to: '/evaluacion', label: 'Riesgo', icon: ShieldCheck, group: 'Decision' },
+  { to: '/cobranza', label: 'Cobranza', icon: HandCoins, group: 'Decision' },
+  { to: '/reportes', label: 'Reportes', icon: BarChart3, group: 'Control' },
 ]
 
 function Reloj() {
@@ -77,20 +75,25 @@ export default function Header() {
         </button>
 
         <nav className="cm-side-tabs" aria-label="Navegacion principal">
-          {TABS.map((tab) => {
-            const Icon = tab.icon
-            const active = location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`)
-            return (
-              <button
-                key={tab.to}
-                className={`cm-side-tab ${active ? 'active' : ''}`}
-                onClick={() => navigate(tab.to)}
-              >
-                <Icon size={18} />
-                <span>{tab.label}</span>
-              </button>
-            )
-          })}
+          {['Panel', 'Atencion', 'Decision', 'Control'].map((group) => (
+            <div className="cm-side-group" key={group}>
+              <span>{group}</span>
+              {TABS.filter((tab) => tab.group === group).map((tab) => {
+                const Icon = tab.icon
+                const active = location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`)
+                return (
+                  <button
+                    key={tab.to}
+                    className={`cm-side-tab ${active ? 'active' : ''}`}
+                    onClick={() => navigate(tab.to)}
+                  >
+                    <Icon size={18} />
+                    <span>{tab.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="cm-side-user">
