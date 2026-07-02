@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:bancofalabella_app2/supabase_config.dart';
+import 'package:bancofalabella_app2/views/home_page.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class LoginPage extends StatefulWidget {
@@ -33,9 +37,9 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       if (!SupabaseConfig.isConfigured) {
-        registerFailedAttempt();
-        showMessage(
-          'Este APK no tiene SUPABASE_ANON_KEY. Recompila la app con la clave anon publica de Supabase.',
+        await _signInWithCore(
+          emailController.text.trim(),
+          passwordController.text.trim(),
         );
         return;
       }
@@ -69,6 +73,45 @@ class _LoginPageState extends State<LoginPage> {
     if (failedAttempts >= 5) {
       lockedUntil = DateTime.now().add(const Duration(minutes: 30));
     }
+  }
+
+  Future<void> _signInWithCore(String username, String password) async {
+    final uri = Uri.parse('${SupabaseConfig.coreBaseUrl}/auth/login');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'codigo_empleado': username.trim().isEmpty ? '0001' : username,
+            'password': password,
+          }),
+        )
+        .timeout(const Duration(seconds: 25));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      registerFailedAttempt();
+      showMessage(_coreErrorMessage(response));
+      return;
+    }
+    failedAttempts = 0;
+    lockedUntil = null;
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => HomePage(userEmail: _loginToEmail(username)),
+      ),
+    );
+  }
+
+  String _coreErrorMessage(http.Response response) {
+    try {
+      final body = jsonDecode(response.body);
+      if (body is Map && body['detail'] != null) {
+        return body['detail'].toString();
+      }
+    } catch (_) {}
+    if (response.statusCode == 401) return 'Credenciales invalidas';
+    if (response.statusCode == 423) return 'Cuenta bloqueada temporalmente';
+    return 'No se pudo iniciar sesion contra el Core.';
   }
 
   String _loginToEmail(String value) {

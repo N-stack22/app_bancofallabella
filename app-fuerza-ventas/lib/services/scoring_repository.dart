@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:bancofalabella_app2/supabase_config.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -515,11 +516,13 @@ class ScoringRepository {
     }
 
     if (!SupabaseConfig.isConfigured) {
-      final cached = await _loadDashboard();
-      if (cached != null) return remember(cached);
-      throw StateError(
-        'Supabase no esta configurado. Falta SUPABASE_ANON_KEY en el APK.',
-      );
+      try {
+        return remember(await _loadDashboardFromCore());
+      } catch (_) {
+        final cached = await _loadDashboard();
+        if (cached != null) return remember(cached);
+        rethrow;
+      }
     }
 
     final client = Supabase.instance.client;
@@ -623,6 +626,154 @@ class ScoringRepository {
       if (cached != null) return remember(cached);
       throw StateError('No se pudo cargar datos desde Supabase: $error');
     }
+  }
+
+  Future<SalesDashboardData> _loadDashboardFromCore() async {
+    final rows = await Future.wait<dynamic>([
+      _getCoreJson('/casos/dashboard'),
+      _getCoreJson('/cartera/demo'),
+      _getCoreJson('/solicitudes/demo'),
+    ]);
+    final dashboard = _asMap(rows[0]);
+    final cartera = _asList(rows[1]);
+    final requests = _asList(rows[2]);
+    final portfolio = cartera.map(_clientFromCoreCartera).toList();
+    final visitados = portfolio
+        .where((client) => client.visitStatus == 'visitado')
+        .length;
+    final conversion = portfolio.isEmpty
+        ? 0
+        : (visitados / portfolio.length) * 100;
+    final advisor = {
+      'id': 'core-asesor-0001',
+      'codigo': '0001',
+      'cod_asesor': '0001',
+      'nombre_completo': 'Asesor Core Banco Falabella',
+      'email': 'asesor0001@bancofalabella.local',
+      'agencia': 'Core Railway',
+      'nivel': 'Asesor',
+      'perfil': 'asesor',
+    };
+    return SalesDashboardData(
+      advisor: advisor,
+      portfolio: portfolio,
+      agencies: const [
+        {
+          'id': 'core-agencia-0001',
+          'agencia': 'Core Railway',
+          'nombre': 'Core Railway',
+          'region': 'Demo',
+          'total_asesores': 1,
+        },
+      ],
+      advisors: [advisor],
+      kpis: [
+        {
+          'agencia': 'Core Railway',
+          'desembolsos': _number(dashboard, 'desembolsados'),
+          'mora_30_pct': 0,
+          'tasa_conversion_pct': conversion,
+        },
+      ],
+      history: portfolio
+          .map(
+            (client) => {
+              'cliente_nombre': client.fullName,
+              'numero_expediente': _text(
+                client.assignment,
+                'numero_expediente',
+              ),
+              'estado_visita': client.visitStatus,
+              'fecha_visita': _text(client.assignment, 'fecha_asignacion'),
+              'recomendacion_asesor': client.priority,
+              'score_final': client.finalScore,
+            },
+          )
+          .toList(),
+      requests: requests,
+      bureau: const [],
+      alerts: const [],
+      collections: const [],
+      pendingSync: 0,
+      lastSyncLabel: 'Core ${_timeLabel(DateTime.now())}',
+      role: 'asesor',
+      online: true,
+    );
+  }
+
+  Future<dynamic> _getCoreJson(String path) async {
+    final response = await http
+        .get(Uri.parse('${SupabaseConfig.coreBaseUrl}$path'))
+        .timeout(const Duration(seconds: 25));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Core ${response.statusCode}: ${response.body}');
+    }
+    return jsonDecode(response.body);
+  }
+
+  PreapprovedClient _clientFromCoreCartera(Map<String, dynamic> item) {
+    final fullName = _text(item, 'cliente_nombre', fallback: 'Cliente Core');
+    final parts = fullName.split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+    final names = parts.take(max(1, (parts.length / 2).ceil())).join(' ');
+    final lastNames = parts.skip(max(1, (parts.length / 2).ceil())).join(' ');
+    final score = _number(item, 'score_prioridad');
+    final amount = _number(item, 'monto_credito');
+    final priority = _text(item, 'prioridad', fallback: 'normal');
+    final visitStatus = _text(item, 'estado_visita', fallback: 'pendiente');
+    return PreapprovedClient(
+      assignment: {
+        ...item,
+        'cliente_id': _text(item, 'cliente_id'),
+        'tipo_gestion': _text(
+          item,
+          'tipo_gestion',
+          fallback: 'NUEVA_SOLICITUD',
+        ),
+        'prioridad': priority,
+        'score_prioridad': score,
+      },
+      profile: {
+        'id': _text(item, 'cliente_id'),
+        'nombres': names.isEmpty ? fullName : names,
+        'apellidos': lastNames,
+        'numero_documento': _text(item, 'documento'),
+        'dni': _text(item, 'documento'),
+        'tipo_negocio': _text(item, 'tipo_gestion', fallback: 'Negocio'),
+        'distrito': 'Core Railway',
+        'direccion': 'Core Railway',
+        'lat_negocio': _number(item, 'lat'),
+        'lng_negocio': _number(item, 'lng'),
+      },
+      credit: {
+        'id': _text(item, 'numero_expediente', fallback: _text(item, 'id')),
+        'cliente_id': _text(item, 'cliente_id'),
+        'estado': visitStatus == 'visitado'
+            ? 'visita_realizada'
+            : 'preaprobado',
+        'segmento': _segmentFromPriority(priority),
+        'monto_hipotesis': amount,
+        'monto_aprobado': amount,
+        'monto_maximo': amount,
+        'score_transaccional': score,
+      },
+      score: {
+        'score_transaccional': score,
+        'score_confianza': score,
+        'monto_hipotesis': amount,
+        'segmento_preliminar': _segmentFromPriority(priority),
+      },
+      fieldFile: visitStatus == 'pendiente'
+          ? const {}
+          : {'estado_ficha': visitStatus, 'score_campo': max(0, score - 10)},
+    );
+  }
+
+  String _segmentFromPriority(String priority) {
+    return switch (priority.toLowerCase()) {
+      'alta' => 'PREMIER',
+      'media' => 'ESTANDAR',
+      _ => 'BASICO',
+    };
   }
 
   Future<void> submitFieldFile({

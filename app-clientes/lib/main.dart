@@ -552,11 +552,13 @@ class CoreApiClient {
 
   Future<Map<String, dynamic>> loadCustomerSummary(
     String document,
-    String token,
-  ) async {
+    String token, {
+    bool forceRefresh = false,
+  }) async {
     final key = document.trim();
     final cached = _summaryCache[key];
-    if (cached != null &&
+    if (!forceRefresh &&
+        cached != null &&
         DateTime.now().difference(cached.createdAt).inSeconds < 8) {
       return cached.data;
     }
@@ -1092,6 +1094,7 @@ class _ClientShellState extends State<ClientShell> {
       final summary = await const CoreApiClient().loadCustomerSummary(
         widget.document,
         widget.token,
+        forceRefresh: true,
       );
       if (!mounted) return;
       setState(() {
@@ -1112,7 +1115,10 @@ class _ClientShellState extends State<ClientShell> {
       PaymentsPage(
         token: widget.token,
         accountNumber: products.savings.number,
-        onOperationCompleted: refreshCustomerSummary,
+        onOperationCompleted: () async {
+          await refreshCustomerSummary();
+          if (mounted) setState(() => selectedIndex = 0);
+        },
       ),
       ProfilePage(profile: profile),
     ];
@@ -1943,7 +1949,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$operation registrada en Core por ${money(amount)}.'),
+          content: Text(
+            '$operation registrada. Saldo y movimientos actualizados.',
+          ),
         ),
       );
       amountController.clear();

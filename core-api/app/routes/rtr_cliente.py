@@ -102,18 +102,12 @@ def crear_operacion(
     """Registra una operación iniciada por el cliente (transferencia / pago)."""
     try:
         return rep_cliente.crear_operacion(db, cli["cliente_id"], data.model_dump())
-    except Exception:
-        from datetime import datetime
-        return {
-            "id": "99999999-1111-4222-8333-444444444444",
-            "cod_cuenta_origen": data.cod_cuenta_origen,
-            "cod_cuenta_destino": data.cod_cuenta_destino,
-            "tipo": data.tipo,
-            "monto": data.monto,
-            "moneda": data.moneda,
-            "estado": "registrado",
-            "created_at": datetime.now().isoformat(),
-        }
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"No se pudo registrar la operacion: {exc}")
 
 
 @router.post("/solicitudes", response_model=SolicitudCreada)

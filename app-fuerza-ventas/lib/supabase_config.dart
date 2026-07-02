@@ -11,6 +11,10 @@ class SupabaseConfig {
     'SUPABASE_BUCKET_DOCUMENTOS',
     defaultValue: 'documentos-credito',
   );
+  static const coreBaseUrl = String.fromEnvironment(
+    'CORE_BASE_URL',
+    defaultValue: 'https://n-stack22-bancofallabela-production.up.railway.app',
+  );
 
   static bool get isConfigured => url.isNotEmpty && anonKey.isNotEmpty;
 }

@@ -60,56 +60,120 @@ def notificaciones(db: Session, cliente_id: str, limit: int = 30) -> list[Notifi
     ).order_by(Notificacion.created_at.desc()).limit(limit).all()
 
 
-def crear_operacion(db: Session, cliente_id: str, data: dict) -> OperacionCliente:
+def crear_operacion(db: Session, cliente_id: str, data: dict) -> dict:
+    op_id = str(uuid.uuid4())
     cod_operacion = f"APP-{uuid.uuid4().hex[:12].upper()}"
     tipo = data.get("tipo")
     monto = float(data.get("monto") or 0)
     cuenta_origen = data.get("cod_cuenta_origen")
-    concepto = "Pago registrado desde App Clientes" if tipo == "pago_cuota" else "Transferencia desde App Clientes"
-    op = OperacionCliente(
-        cliente_id=cliente_id,
-        cod_cuenta_origen=cuenta_origen,
-        cod_cuenta_destino=data.get("cod_cuenta_destino"),
-        tipo=tipo,
-        monto=monto,
-        moneda=data.get("moneda", "PEN"),
-        estado="registrado",
-        cod_operacion_core=cod_operacion,
+    if monto <= 0:
+        raise ValueError("El monto debe ser mayor a cero")
+    if not cuenta_origen:
+        cuenta_origen = db.execute(
+            text(
+                """SELECT cod_cuenta_ahorro
+                   FROM cr_cuentas_ahorro
+                   WHERE cliente_id = :cliente_id
+                   ORDER BY cod_cuenta_ahorro
+                   LIMIT 1"""
+            ),
+            {"cliente_id": cliente_id},
+        ).scalar()
+    if not cuenta_origen:
+        raise ValueError("El cliente no tiene cuenta de ahorro activa")
+
+    concepto = (
+        "Pago de cuota desde App Clientes"
+        if tipo == "pago_cuota"
+        else "Transferencia desde App Clientes"
     )
-    db.add(op)
+    created_at = datetime.now(timezone.utc)
     db.execute(
         text(
             """INSERT INTO cr_movimientos
                  (id, cod_operacion, cliente_id, cod_cuenta, tipo, concepto,
                   canal, monto, moneda, fecha_operacion)
                VALUES (:id, :codop, :cliente_id, :cuenta, 'DEB',
-                       :concepto, 'APP', :monto, :moneda, now())
+                       :concepto, 'APP', :monto, :moneda, :created_at)
                ON CONFLICT (cod_operacion) DO NOTHING"""
         ),
         {
-            "id": str(uuid.uuid4()),
+            "id": op_id,
             "codop": cod_operacion,
             "cliente_id": cliente_id,
             "cuenta": cuenta_origen,
             "concepto": concepto,
             "monto": monto,
             "moneda": data.get("moneda", "PEN"),
+            "created_at": created_at,
         },
     )
-    if cuenta_origen:
+    result = db.execute(
+        text(
+            """UPDATE cr_cuentas_ahorro
+               SET saldo_capital = GREATEST(COALESCE(saldo_capital, 0) - :monto, 0),
+                   sync_at = now()
+               WHERE cliente_id = :cliente_id
+                 AND cod_cuenta_ahorro = :cuenta"""
+        ),
+        {"cliente_id": cliente_id, "cuenta": cuenta_origen, "monto": monto},
+    )
+    if result.rowcount == 0:
+        raise ValueError("Cuenta de origen no encontrada para el cliente")
+
+    if tipo == "pago_cuota":
         db.execute(
             text(
-                """UPDATE cr_cuentas_ahorro
+                """UPDATE cr_creditos
                    SET saldo_capital = GREATEST(COALESCE(saldo_capital, 0) - :monto, 0),
+                       saldo_total = GREATEST(COALESCE(saldo_total, 0) - :monto, 0),
+                       cuotas_pagadas = LEAST(
+                         COALESCE(cuotas_pagadas, 0) + 1,
+                         COALESCE(cuotas_total, COALESCE(cuotas_pagadas, 0) + 1)
+                       ),
                        sync_at = now()
-                   WHERE cliente_id = :cliente_id
-                     AND cod_cuenta_ahorro = :cuenta"""
+                   WHERE id = (
+                       SELECT id
+                       FROM cr_creditos
+                       WHERE cliente_id = :cliente_id
+                         AND estado = 'vigente'
+                       ORDER BY fecha_desembolso DESC NULLS LAST
+                       LIMIT 1
+                   )"""
             ),
-            {"cliente_id": cliente_id, "cuenta": cuenta_origen, "monto": monto},
+            {"cliente_id": cliente_id, "monto": monto},
         )
+        db.execute(
+            text(
+                """UPDATE cr_cronograma_pagos
+                   SET estado_cuota = 'pagado',
+                       fecha_pago = CURRENT_DATE,
+                       sync_at = now()
+                   WHERE id = (
+                       SELECT cp.id
+                       FROM cr_cronograma_pagos cp
+                       JOIN cr_creditos cr
+                         ON cr.cod_cuenta_credito = cp.cod_cuenta_credito
+                       WHERE cr.cliente_id = :cliente_id
+                         AND COALESCE(cp.estado_cuota, '') <> 'pagado'
+                       ORDER BY cp.fecha_vencimiento, cp.nro_cuota
+                       LIMIT 1
+                   )"""
+            ),
+            {"cliente_id": cliente_id},
+        )
+
     db.commit()
-    db.refresh(op)
-    return op
+    return {
+        "id": op_id,
+        "cod_cuenta_origen": cuenta_origen,
+        "cod_cuenta_destino": data.get("cod_cuenta_destino"),
+        "tipo": tipo,
+        "monto": monto,
+        "moneda": data.get("moneda", "PEN"),
+        "estado": "registrado",
+        "created_at": created_at,
+    }
 
 
 def resumen_demo_por_documento(db: Session, numero_documento: str) -> dict | None:
