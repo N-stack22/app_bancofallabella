@@ -27,7 +27,7 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
     try:
         result = ctl_auth_cliente.login(db, data.numero_documento, data.password)
     except Exception:
-        if data.password != "12345":
+        if data.password != "1234":
             raise HTTPException(status_code=401, detail="Credenciales invalidas")
         cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
         if cliente is None:
@@ -41,7 +41,7 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
     if result and result.get("_bloqueado"):
         raise HTTPException(status_code=423, detail="Usuario bloqueado por intentos fallidos")
     if not result:
-        if data.password == "12345":
+        if data.password == "1234":
             cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
             if cliente is not None:
                 token = create_access_token({

@@ -102,9 +102,8 @@ class AppColors {
   static const background = Color(0xFFEFF3F4);
 }
 
-const demoDni = '72028183';
-const demoEmail = 'nathalie.rodriguez@cliente.falabella.pe';
-const demoPassword = '12345';
+const demoDni = '43440349';
+const demoPassword = '1234';
 const secureStorage = FlutterSecureStorage();
 const productionCoreBaseUrl =
     'https://n-stack22-bancofallabela-production.up.railway.app';
@@ -131,52 +130,27 @@ String get primaryCoreBaseUrl {
 
 String get fallbackCoreBaseUrl => primaryCoreBaseUrl;
 
-final demoProfile = UserProfile(
-  name: 'Nathalie Tatiana Rodriguez Rios',
-  email: demoEmail,
-  phone: '987 654 321',
-  document: 'DNI $demoDni',
-  address: 'Av. La Marina 1250, San Miguel',
-  customerSince: 'Cliente desde 2024',
-);
-
-final demoProducts = BankProducts(
+final fallbackProducts = BankProducts(
   savings: SavingsAccount(
-    name: 'Cuenta Ahorro Digital',
-    number: '0011-0345-789012',
-    balance: 3450.70,
-    availableBalance: 3388.20,
-    monthlyDeposits: 1850.00,
-    cci: '002-001103457890123456-55',
-    statements: const [
-      AccountStatement('Mayo 2026', 'S/ 3,450.70', 'Disponible'),
-      AccountStatement('Abril 2026', 'S/ 2,980.10', 'Disponible'),
-      AccountStatement('Marzo 2026', 'S/ 2,540.00', 'Disponible'),
-    ],
+    name: 'Sin cuenta registrada',
+    number: 'Sin cuenta',
+    balance: 0,
+    availableBalance: 0,
+    monthlyDeposits: 0,
+    cci: 'Sin CCI',
+    statements: const [],
   ),
   credit: CreditProduct(
-    name: 'Prestamo Personal',
-    number: 'PRE-2026-0158',
-    principal: 5000,
-    pending: 3200,
-    nextPayment: 468.30,
-    dueDate: '15 Jun 2026',
-    tea: '38.5%',
-    installments: const [
-      Installment(1, '15 Abr 2026', 468.30, 'Pagado'),
-      Installment(2, '15 May 2026', 468.30, 'Pagado'),
-      Installment(3, '15 Jun 2026', 468.30, 'Pendiente'),
-      Installment(4, '15 Jul 2026', 468.30, 'Pendiente'),
-      Installment(5, '15 Ago 2026', 468.30, 'Pendiente'),
-    ],
+    name: 'Sin credito activo',
+    number: 'Sin credito',
+    principal: 0,
+    pending: 0,
+    nextPayment: 0,
+    dueDate: 'Sin fecha',
+    tea: '0.00%',
+    installments: const [],
   ),
-  movements: const [
-    Movement('Deposito sueldo', 'Hoy, 09:18', 1250.00, true),
-    Movement('Pago tarjeta Falabella', 'Ayer, 19:44', 180.90, false),
-    Movement('Transferencia recibida', '24 May, 14:10', 320.00, true),
-    Movement('Pago servicios luz', '23 May, 08:40', 96.20, false),
-    Movement('Compra Tottus', '22 May, 20:15', 143.60, false),
-  ],
+  movements: const [],
 );
 
 class _SummaryCacheEntry {
@@ -206,16 +180,15 @@ class UserProfile {
   factory UserProfile.fromCoreSummary(Map<String, dynamic> json) {
     final cliente = _asMap(json['cliente']);
     final dni = _text(cliente['numero_documento'], demoDni);
+    final nombres = _text(cliente['nombres'], '');
+    final apellidos = _text(cliente['apellidos'], '');
     final coreName = [
-      _text(cliente['nombres'], 'Cliente'),
-      _text(cliente['apellidos'], 'Banco Falabella'),
+      nombres,
+      apellidos,
     ].where((part) => part.trim().isNotEmpty).join(' ');
-    final fullName = dni == demoDni ? demoProfile.name : coreName;
     return UserProfile(
-      name: fullName,
-      email: dni == demoDni
-          ? demoProfile.email
-          : _text(cliente['email'], '$dni@cliente.falabella.pe'),
+      name: _text(coreName, 'Cliente Banco Falabella'),
+      email: _text(cliente['email'], '$dni@cliente.falabella.pe'),
       phone: _text(cliente['telefono'], '999 000 000'),
       document: 'DNI $dni',
       address: _text(cliente['direccion'], 'Direccion registrada en Core'),
@@ -244,6 +217,7 @@ class BankProducts {
 
     final cuenta = cuentas.isEmpty ? <String, dynamic>{} : cuentas.first;
     final credito = creditos.isEmpty ? <String, dynamic>{} : creditos.first;
+    final hasSavingsAccount = cuenta.isNotEmpty;
     final codCredito = _text(credito['cod_cuenta_credito'], '');
     final cuotas = _asListOfMaps(cronogramas[codCredito]);
     final nextInstallment = cuotas.firstWhere(
@@ -307,65 +281,68 @@ class BankProducts {
 
     return BankProducts(
       savings: SavingsAccount(
-        name: _text(cuenta['tipo_cuenta'], 'Cuenta Ahorro Digital'),
-        number: _text(cuenta['cod_cuenta_ahorro'], demoProducts.savings.number),
+        name: _text(cuenta['tipo_cuenta'], fallbackProducts.savings.name),
+        number: _text(
+          cuenta['cod_cuenta_ahorro'],
+          fallbackProducts.savings.number,
+        ),
         balance: visibleBalance,
         availableBalance: visibleBalance,
-        monthlyDeposits: visibleDeposits == 0
-            ? demoProducts.savings.monthlyDeposits
-            : visibleDeposits,
+        monthlyDeposits: visibleDeposits,
         cci: _text(
           cuenta['cci'],
-          '002-${_text(cuenta['cod_cuenta_ahorro'], '000000000000000000')}',
+          hasSavingsAccount
+              ? '002-${_text(cuenta['cod_cuenta_ahorro'], '000000000000000000')}'
+              : fallbackProducts.savings.cci,
         ),
-        statements: [
-          AccountStatement(
-            'Junio 2026',
-            money(_jsonDouble(cuenta['saldo_capital'])),
-            'Core',
-          ),
-          const AccountStatement('Mayo 2026', 'Generado en BD', 'Disponible'),
-          const AccountStatement('Abril 2026', 'Generado en BD', 'Disponible'),
-        ],
+        statements: hasSavingsAccount
+            ? [
+                AccountStatement(
+                  'Junio 2026',
+                  money(_jsonDouble(cuenta['saldo_capital'])),
+                  'Core',
+                ),
+                const AccountStatement(
+                  'Mayo 2026',
+                  'Generado en BD',
+                  'Disponible',
+                ),
+                const AccountStatement(
+                  'Abril 2026',
+                  'Generado en BD',
+                  'Disponible',
+                ),
+              ]
+            : fallbackProducts.savings.statements,
       ),
       credit: CreditProduct(
-        name: _text(credito['producto'], demoProducts.credit.name),
+        name: _text(credito['producto'], fallbackProducts.credit.name),
         number: _text(
           credito['cod_cuenta_credito'],
-          demoProducts.credit.number,
+          fallbackProducts.credit.number,
         ),
-        principal: _jsonDouble(credito['monto_desembolsado']) == 0
-            ? demoProducts.credit.principal
-            : _jsonDouble(credito['monto_desembolsado']),
-        pending: _jsonDouble(credito['saldo_capital']) == 0
-            ? demoProducts.credit.pending
-            : _jsonDouble(credito['saldo_capital']),
-        nextPayment: _jsonDouble(nextInstallment['monto_cuota']) == 0
-            ? demoProducts.credit.nextPayment
-            : _jsonDouble(nextInstallment['monto_cuota']),
+        principal: _jsonDouble(credito['monto_desembolsado']),
+        pending: _jsonDouble(credito['saldo_capital']),
+        nextPayment: _jsonDouble(nextInstallment['monto_cuota']),
         dueDate: _formatCoreDate(
           _text(
             nextInstallment['fecha_vencimiento'],
-            demoProducts.credit.dueDate,
+            fallbackProducts.credit.dueDate,
           ),
         ),
         tea: '${_jsonDouble(credito['tea']).toStringAsFixed(2)}%',
-        installments: cuotas.isEmpty
-            ? demoProducts.credit.installments
-            : cuotas
-                  .map(
-                    (item) => Installment(
-                      _jsonInt(item['nro_cuota']),
-                      _formatCoreDate(_text(item['fecha_vencimiento'], '')),
-                      _jsonDouble(item['monto_cuota']),
-                      _titleCase(_text(item['estado_cuota'], 'Pendiente')),
-                    ),
-                  )
-                  .toList(),
+        installments: cuotas
+            .map(
+              (item) => Installment(
+                _jsonInt(item['nro_cuota']),
+                _formatCoreDate(_text(item['fecha_vencimiento'], '')),
+                _jsonDouble(item['monto_cuota']),
+                _titleCase(_text(item['estado_cuota'], 'Pendiente')),
+              ),
+            )
+            .toList(),
       ),
-      movements: visibleMovements.isEmpty
-          ? demoProducts.movements
-          : visibleMovements,
+      movements: visibleMovements,
     );
   }
 }
@@ -1376,7 +1353,9 @@ class CreditsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final credit = products.credit;
-    final progress = 1 - (credit.pending / credit.principal);
+    final progress = credit.principal <= 0
+        ? 0.0
+        : 1 - (credit.pending / credit.principal);
 
     return AppPage(
       child: Column(

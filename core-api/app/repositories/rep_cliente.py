@@ -12,8 +12,6 @@ from app.models.mdl_cliente_mobile import (
 )
 from app.data.casos_credito import casos_completos
 
-DEMO_CLIENTE_ID = "11111111-2222-4333-8444-555555555555"
-
 
 def get_usuario_by_username(db: Session, username: str) -> UsuarioCliente | None:
     return db.query(UsuarioCliente).filter(
@@ -169,35 +167,24 @@ def resumen_demo_por_documento(db: Session, numero_documento: str) -> dict | Non
     }
 
 
-def cliente_demo_dict(numero_documento: str = "72028183") -> dict | None:
+def cliente_demo_dict(numero_documento: str = "43440349") -> dict | None:
     """Cliente demo serializable para operar cuando Supabase aun no responde."""
-    if numero_documento != "72028183":
-        caso = _caso_por_documento(numero_documento)
-        if caso is None:
-            return None
-        return {
-            "id": _uuid_from_document(numero_documento),
-            "cod_cliente": f"CLI-{numero_documento[-4:]}",
-            "numero_documento": numero_documento,
-            "nombres": caso["nombres"],
-            "apellidos": caso["apellidos"],
-            "email": f"{numero_documento}@cliente.falabella.pe",
-            "telefono": caso.get("telefono"),
-            "direccion": f"{caso.get('distrito', 'Huancayo')}, Junin",
-        }
+    caso = _caso_por_documento(numero_documento)
+    if caso is None:
+        return None
     return {
-        "id": DEMO_CLIENTE_ID,
+        "id": _uuid_from_document(numero_documento),
         "cod_cliente": f"CLI-{numero_documento[-4:]}",
         "numero_documento": numero_documento,
-        "nombres": "Nathalie Tatiana",
-        "apellidos": "Rodriguez Rios",
-        "email": "nathalie.rodriguez@cliente.falabella.pe",
-        "telefono": "987654321",
-        "direccion": "Av. La Marina 1250, San Miguel",
+        "nombres": caso["nombres"],
+        "apellidos": caso["apellidos"],
+        "email": f"{numero_documento}@cliente.falabella.pe",
+        "telefono": caso.get("telefono"),
+        "direccion": f"{caso.get('distrito', 'Huancayo')}, Junin",
     }
 
 
-def resumen_demo_fallback(numero_documento: str = "72028183") -> dict:
+def resumen_demo_fallback(numero_documento: str = "43440349") -> dict:
     """Resumen homebanking sin consultas SQL, usado como respaldo de Railway."""
     cliente = cliente_demo_dict(numero_documento)
     if cliente is None:
@@ -342,6 +329,7 @@ def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:
         {"doc": numero_documento},
     ).mappings().first()
     if not cliente:
+        caso = _caso_por_documento(numero_documento) or {}
         cliente_id = str(uuid.uuid4())
         db.execute(
             text(
@@ -351,16 +339,23 @@ def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:
                       tipo_negocio, nombre_negocio, ingresos_estimados,
                       calificacion_sbs, es_prospecto)
                    VALUES
-                     (:id, :cod, :doc, 'DNI', 'Jose', 'Demo Falabella',
-                      '999888777', :email, 'Direccion demo Banco Falabella',
-                      'Bodega', 'Bodega Demo Falabella', 3200.00,
+                     (:id, :cod, :doc, 'DNI', :nombres, :apellidos,
+                      :telefono, :email, :direccion,
+                      :tipo_negocio, :nombre_negocio, :ingresos_estimados,
                       'Normal', TRUE)"""
             ),
             {
                 "id": cliente_id,
                 "cod": f"CLI-{numero_documento[-4:]}",
                 "doc": numero_documento,
+                "nombres": caso.get("nombres", "Cliente"),
+                "apellidos": caso.get("apellidos", "Banco Falabella"),
+                "telefono": caso.get("telefono", "999888777"),
                 "email": f"{numero_documento}@cliente.falabella.pe",
+                "direccion": f"{caso.get('distrito', 'Huancayo')}, Junin",
+                "tipo_negocio": caso.get("tipo_negocio", "Bodega"),
+                "nombre_negocio": caso.get("nombre_negocio", "Negocio Banco Falabella"),
+                "ingresos_estimados": caso.get("ingresos_estimados", 3200.00),
             },
         )
         cliente = db.execute(
@@ -414,13 +409,15 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
         text(
             """INSERT INTO usuarios_cliente (id, cliente_id, username, password_hash, activo)
                VALUES (:id, :cliente_id, :username, :password_hash, TRUE)
-               ON CONFLICT (username) DO NOTHING"""
+               ON CONFLICT (username) DO UPDATE
+               SET password_hash = EXCLUDED.password_hash,
+                   activo = TRUE"""
         ),
         {
             "id": str(uuid.uuid4()),
             "cliente_id": cliente_id,
             "username": doc,
-            "password_hash": hash_password("12345"),
+            "password_hash": hash_password("1234"),
         },
     )
     cuenta = f"AHO-{doc[-4:]}"

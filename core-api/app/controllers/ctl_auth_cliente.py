@@ -9,7 +9,7 @@ MAX_INTENTOS = 5
 
 def login(db: Session, numero_documento: str, password: str) -> dict | None:
     usuario = rep_cliente.get_usuario_by_username(db, numero_documento)
-    if not usuario and numero_documento == "72028183":
+    if not usuario and rep_cliente.cliente_demo_dict(numero_documento):
         rep_cliente.asegurar_cliente_demo_login(db, numero_documento)
         usuario = rep_cliente.get_usuario_by_username(db, numero_documento)
     if not usuario or not usuario.activo:
