@@ -1,6 +1,7 @@
 import 'package:bancofalabella_app2/services/scoring_repository.dart';
 import 'package:bancofalabella_app2/viewmodels/home_view_model.dart';
 import 'package:bancofalabella_app2/viewmodels/route_view_model.dart';
+import 'package:bancofalabella_app2/views/login_page.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
@@ -77,7 +78,14 @@ class _HomePageState extends State<HomePage> {
             ),
             IconButton(
               tooltip: 'Cerrar sesion',
-              onPressed: viewModel.signOut,
+              onPressed: () async {
+                await viewModel.signOut();
+                if (!context.mounted) return;
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                  (_) => false,
+                );
+              },
               icon: const Icon(Icons.logout),
             ),
           ],
@@ -92,7 +100,7 @@ class _HomePageState extends State<HomePage> {
             if (snapshot.hasError) {
               return _StateMessage(
                 icon: Icons.cloud_off,
-                title: 'No se pudo cargar Supabase',
+                title: 'No se pudo cargar la cartera',
                 message: snapshot.error.toString(),
               );
             }

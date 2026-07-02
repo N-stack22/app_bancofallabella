@@ -1,6 +1,4 @@
 import 'package:bancofalabella_app2/supabase_config.dart';
-import 'package:bancofalabella_app2/services/scoring_repository.dart';
-import 'package:bancofalabella_app2/views/home_page.dart';
 import 'package:bancofalabella_app2/views/login_page.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -89,47 +87,7 @@ class BancoFalabellaApp extends StatelessWidget {
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         ),
       ),
-      home: const AuthGate(),
+      home: const LoginPage(),
     );
-  }
-}
-
-class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<String?>(
-      future: _storedCoreEmail(),
-      builder: (context, snapshot) {
-        final coreEmail = snapshot.data;
-        if (coreEmail != null && coreEmail.isNotEmpty) {
-          return HomePage(userEmail: coreEmail);
-        }
-
-        if (!SupabaseConfig.isConfigured) {
-          return const LoginPage();
-        }
-
-        final auth = Supabase.instance.client.auth;
-        final session = auth.currentSession;
-        if (session != null) {
-          return HomePage(userEmail: session.user.email);
-        }
-
-        return const LoginPage();
-      },
-    );
-  }
-
-  Future<String?> _storedCoreEmail() async {
-    final token = await ScoringRepository.readCoreToken();
-    if (token == null || token.isEmpty) return null;
-    final advisor = await ScoringRepository.readCoreAdvisor();
-    final code = (advisor?['codigo_empleado'] ?? advisor?['codigo'] ?? '')
-        .toString()
-        .replaceAll(RegExp(r'[^0-9]'), '');
-    if (code.isEmpty) return 'asesor@bancofalabella.local';
-    return 'asesor${code.padLeft(4, '0')}@bancofalabella.local';
   }
 }

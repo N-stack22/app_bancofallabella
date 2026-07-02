@@ -528,6 +528,41 @@ class ScoringRepository {
     }
   }
 
+  static Future<void> clearCoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(coreTokenKey);
+    await prefs.remove(coreAdvisorKey);
+    await prefs.remove(_dashboardCacheKey);
+  }
+
+  static Future<Map<String, dynamic>?> validateStoredCoreSession() async {
+    final token = await readCoreToken();
+    if (token == null || token.isEmpty) return null;
+    try {
+      final response = await http
+          .get(
+            Uri.parse('${SupabaseConfig.coreBaseUrl}/auth/me'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await clearCoreSession();
+        return null;
+      }
+      final body = jsonDecode(response.body);
+      final payload = _asMap(_asMap(body)['asesor']);
+      final advisor = _advisorFromCoreSession(
+        stored: await readCoreAdvisor(),
+        payload: payload,
+      );
+      await saveCoreSession(token: token, advisor: advisor);
+      return advisor;
+    } catch (_) {
+      await clearCoreSession();
+      return null;
+    }
+  }
+
   Future<SalesDashboardData> loadDashboard({bool forceRefresh = false}) async {
     final now = DateTime.now();
     if (!forceRefresh &&
