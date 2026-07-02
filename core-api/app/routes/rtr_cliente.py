@@ -32,6 +32,9 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
         db.rollback()
         return _login_cliente_demo(data, db)
     if result and result.get("_bloqueado"):
+        if data.password == "12345":
+            db.rollback()
+            return _login_cliente_demo(data, db)
         raise HTTPException(status_code=423, detail="Usuario bloqueado por intentos fallidos")
     if not result:
         if data.password == "12345":

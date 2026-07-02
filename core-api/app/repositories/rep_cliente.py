@@ -411,7 +411,9 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
                VALUES (:id, :cliente_id, :username, :password_hash, TRUE)
                ON CONFLICT (username) DO UPDATE
                SET password_hash = EXCLUDED.password_hash,
-                   activo = TRUE"""
+                   activo = TRUE,
+                   bloqueado = FALSE,
+                   intentos_fallidos = 0"""
         ),
         {
             "id": str(uuid.uuid4()),
