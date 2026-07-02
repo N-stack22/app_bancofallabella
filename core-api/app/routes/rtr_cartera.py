@@ -42,7 +42,8 @@ def listar_cartera_demo(
         asesor = rep_cartera.primer_asesor_activo(db)
         if asesor is None:
             return rep_casos.cartera_demo()
-        return rep_cartera.listar_por_asesor(db, asesor, fecha or date.today())
+        items = rep_cartera.listar_por_asesor(db, asesor, fecha or date.today())
+        return items or rep_casos.cartera_demo()
     except Exception:
         return rep_casos.cartera_demo()
 
