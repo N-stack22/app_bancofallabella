@@ -28,7 +28,7 @@ def resumen() -> dict:
         "rechazados": sum(1 for c in casos if c["decision_comite"] == "rechazado"),
         "monto_solicitado": sum(c["monto_solicitado"] for c in casos),
         "monto_aprobado": sum(c["monto_aprobado"] for c in casos),
-        "usuario_cliente_demo": "DNI del caso + clave 1234",
+        "usuario_cliente_demo": "DNI del caso + clave 12345",
         "usuario_asesor_demo": "0001 / 1234",
     }
 
@@ -101,7 +101,7 @@ def sembrar(db: Session) -> dict:
     Este seed deja listo:
     - 1 agencia Banco Falabella.
     - 1 asesor de negocio (login 0001 / clave 1234).
-    - 30 clientes/prospectos con usuario de App Clientes (DNI / clave 1234).
+    - 30 clientes/prospectos con usuario de App Clientes (DNI / clave 12345).
     - 30 solicitudes/expedientes del flujo movil.
     - 30 asignaciones en cartera como NUEVA_SOLICITUD.
     - 30 consultas de buro/listas.
@@ -223,7 +223,7 @@ def sembrar(db: Session) -> dict:
         "actualizados": actualizados,
         "omitidos": omitidos,
         "usuarios_cliente": 30,
-        "clave_clientes": "1234",
+        "clave_clientes": "12345",
         "asesor": "0001 / 1234",
         **resumen(),
     }
@@ -346,7 +346,7 @@ def _crear_usuario_cliente(db: Session, cliente_id: str, caso: dict) -> None:
             "id": str(uuid.uuid4()),
             "cliente_id": cliente_id,
             "username": caso["numero_documento"],
-            "password_hash": hash_password("1234"),
+            "password_hash": hash_password("12345"),
         },
     )
 

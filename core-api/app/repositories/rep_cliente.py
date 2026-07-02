@@ -417,7 +417,7 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
             "id": str(uuid.uuid4()),
             "cliente_id": cliente_id,
             "username": doc,
-            "password_hash": hash_password("1234"),
+            "password_hash": hash_password("12345"),
         },
     )
     cuenta = f"AHO-{doc[-4:]}"

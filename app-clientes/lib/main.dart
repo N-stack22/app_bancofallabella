@@ -103,7 +103,7 @@ class AppColors {
 }
 
 const demoDni = '43440349';
-const demoPassword = '1234';
+const demoPassword = '12345';
 const secureStorage = FlutterSecureStorage();
 const productionCoreBaseUrl =
     'https://n-stack22-bancofallabela-production.up.railway.app';
