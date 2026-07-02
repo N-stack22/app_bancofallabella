@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -102,6 +102,10 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
             """SELECT id, agencia_id
                FROM asesores
                WHERE activo = TRUE
+                 AND lower(replace(COALESCE(perfil, ''), '-', '_')) IN (
+                   'asesor', 'operador', 'asesor_negocios',
+                   'asesor de negocios', 'asesor_de_negocios'
+                 )
                ORDER BY created_at NULLS LAST
                LIMIT 1"""
         )
@@ -201,15 +205,6 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
         },
     )
     db.commit()
-    return {"id": sol_id, "numero_expediente": expediente, "estado": "enviado"}
-
-
-def crear_desde_cliente_fallback(d: dict) -> dict:
-    """Respuesta demo cuando Railway no tiene conexion activa a la BD."""
-    doc = str(d.get("numero_documento") or "00000000")
-    sol_id = str(uuid.uuid4())
-    stamp = datetime.now(timezone.utc).strftime("%m%d%H%M%S")
-    expediente = f"EXP-APP-{doc[-4:]}-{stamp}"
     return {"id": sol_id, "numero_expediente": expediente, "estado": "enviado"}
 
 
@@ -582,7 +577,9 @@ def eliminar_documento(db: Session, documento_id: str) -> bool:
 def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dict | None:
     row = db.execute(
         text(
-            """SELECT id, numero_expediente, estado, monto_aprobado
+            """SELECT id, numero_expediente, cliente_id, estado,
+                      monto_solicitado, monto_aprobado, plazo_meses,
+                      cuota_estimada, tea_referencial
                FROM solicitudes_credito
                WHERE id = :id"""
         ),
@@ -603,6 +600,7 @@ def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dic
         ),
         {"id": solicitud_id},
     )
+    _materializar_desembolso_cliente(db, row)
     _outbox(db, solicitud_id, "desembolso", {
         "numero_expediente": row["numero_expediente"],
         "monto_desembolsado": float(row["monto_aprobado"] or 0),
@@ -610,6 +608,165 @@ def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dic
     })
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": "desembolsado"}
+
+
+def _materializar_desembolso_cliente(db: Session, solicitud) -> None:
+    """Refleja un desembolso aprobado en productos, cuenta y movimientos del cliente."""
+    cliente_id = str(solicitud["cliente_id"])
+    cliente = db.execute(
+        text("SELECT numero_documento FROM clientes WHERE id = :id"),
+        {"id": cliente_id},
+    ).mappings().first()
+    if not cliente:
+        raise ValueError("Cliente de la solicitud no encontrado")
+
+    expediente = solicitud["numero_expediente"]
+    monto = float(solicitud["monto_aprobado"] or solicitud["monto_solicitado"] or 0)
+    if monto <= 0:
+        raise ValueError("La solicitud no tiene monto aprobado para desembolsar")
+
+    plazo = int(solicitud["plazo_meses"] or 12)
+    plazo = max(plazo, 1)
+    cuota = float(solicitud["cuota_estimada"] or (monto / plazo))
+    tea = float(solicitud["tea_referencial"] or 43.92)
+    cuenta = f"AHO-{str(cliente['numero_documento'])[-4:]}"
+    cod_credito = f"CR-{expediente}"[:30]
+    cod_operacion = f"OP-{expediente}"[:40]
+    fecha = datetime.now(timezone.utc).date()
+
+    db.execute(
+        text(
+            """INSERT INTO cr_cuentas_ahorro
+                 (id, cod_cuenta_ahorro, cliente_id, tipo_cuenta, moneda,
+                  saldo_capital, saldo_interes, tea, estado)
+               VALUES (:id, :cod, :cliente_id, 'Ahorro Digital', 'PEN',
+                       0, 0, 2.50, 'activa')
+               ON CONFLICT (cod_cuenta_ahorro) DO NOTHING"""
+        ),
+        {"id": str(uuid.uuid4()), "cod": cuenta, "cliente_id": cliente_id},
+    )
+
+    db.execute(
+        text(
+            """INSERT INTO cr_creditos
+                 (id, cod_cuenta_credito, cliente_id, producto,
+                  monto_desembolsado, saldo_capital, saldo_total, dias_mora,
+                  calificacion_interna, estado, fecha_desembolso, tea,
+                  cuotas_total, cuotas_pagadas)
+               VALUES (:id, :cod, :cliente_id, 'Credito Empresarial MYPE',
+                       :monto, :monto, :saldo_total, 0, 'NORMAL', 'vigente',
+                       :fecha, :tea, :plazo, 0)
+               ON CONFLICT (cod_cuenta_credito)
+               DO UPDATE SET monto_desembolsado=EXCLUDED.monto_desembolsado,
+                             saldo_capital=EXCLUDED.saldo_capital,
+                             saldo_total=EXCLUDED.saldo_total,
+                             estado='vigente',
+                             fecha_desembolso=EXCLUDED.fecha_desembolso,
+                             tea=EXCLUDED.tea,
+                             cuotas_total=EXCLUDED.cuotas_total,
+                             sync_at=now()"""
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "cod": cod_credito,
+            "cliente_id": cliente_id,
+            "monto": monto,
+            "saldo_total": round(cuota * plazo, 2),
+            "fecha": fecha,
+            "tea": tea,
+            "plazo": plazo,
+        },
+    )
+
+    saldo = monto
+    for nro in range(1, plazo + 1):
+        capital = round(monto / plazo, 2)
+        interes = max(round(cuota - capital, 2), 0)
+        if nro == plazo:
+            capital = round(saldo, 2)
+        saldo = max(round(saldo - capital, 2), 0)
+        db.execute(
+            text(
+                """INSERT INTO cr_cronograma_pagos
+                     (id, cod_cuenta_credito, nro_cuota, fecha_vencimiento,
+                      monto_cuota, monto_capital, monto_interes, saldo, estado_cuota)
+                   VALUES (:id, :cod, :nro, :fecha, :cuota, :capital,
+                           :interes, :saldo, 'pendiente')
+                   ON CONFLICT (cod_cuenta_credito, nro_cuota)
+                   DO UPDATE SET fecha_vencimiento=EXCLUDED.fecha_vencimiento,
+                                 monto_cuota=EXCLUDED.monto_cuota,
+                                 monto_capital=EXCLUDED.monto_capital,
+                                 monto_interes=EXCLUDED.monto_interes,
+                                 saldo=EXCLUDED.saldo,
+                                 estado_cuota='pendiente',
+                                 sync_at=now()"""
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "cod": cod_credito,
+                "nro": nro,
+                "fecha": fecha + timedelta(days=30 * nro),
+                "cuota": cuota,
+                "capital": capital,
+                "interes": interes,
+                "saldo": saldo,
+            },
+        )
+
+    movimiento_existia = db.execute(
+        text("SELECT 1 FROM cr_movimientos WHERE cod_operacion = :cod"),
+        {"cod": cod_operacion},
+    ).first()
+    db.execute(
+        text(
+            """INSERT INTO cr_movimientos
+                 (id, cod_operacion, cliente_id, cod_cuenta, tipo, concepto,
+                  canal, monto, moneda, fecha_operacion)
+               VALUES (:id, :codop, :cliente_id, :cuenta, 'CRE',
+                       'Desembolso credito empresarial MYPE', 'CORE', :monto,
+                       'PEN', now())
+               ON CONFLICT (cod_operacion) DO NOTHING"""
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "codop": cod_operacion,
+            "cliente_id": cliente_id,
+            "cuenta": cuenta,
+            "monto": monto,
+        },
+    )
+    if not movimiento_existia:
+        db.execute(
+            text(
+                """UPDATE cr_cuentas_ahorro
+                   SET saldo_capital = COALESCE(saldo_capital, 0) + :monto,
+                       sync_at = now()
+                   WHERE cliente_id = :cliente_id
+                     AND cod_cuenta_ahorro = :cuenta"""
+            ),
+            {"cliente_id": cliente_id, "cuenta": cuenta, "monto": monto},
+        )
+
+    db.execute(
+        text(
+            """INSERT INTO notificaciones
+                 (id, destinatario_tipo, cliente_id, titulo, cuerpo, tipo, data_json)
+               SELECT :id, 'cliente', :cliente_id, 'Credito desembolsado',
+                      :cuerpo, 'credito', CAST(:data AS jsonb)
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM notificaciones
+                   WHERE cliente_id = :cliente_id
+                     AND data_json->>'numero_expediente' = :exp
+               )"""
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "cliente_id": cliente_id,
+            "cuerpo": f"Tu expediente {expediente} fue desembolsado por S/ {monto:.2f}.",
+            "data": json.dumps({"numero_expediente": expediente}),
+            "exp": expediente,
+        },
+    )
 
 
 def _outbox(db: Session, solicitud_id: str, evento: str, payload: dict) -> None:

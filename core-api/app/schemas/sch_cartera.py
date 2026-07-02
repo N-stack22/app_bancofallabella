@@ -4,6 +4,7 @@ from typing import Optional
 class CarteraItemOut(BaseModel):
     id: str
     cliente_id: str
+    solicitud_id: Optional[str] = None
     cliente_nombre: str
     documento: str
     numero_expediente: Optional[str] = None

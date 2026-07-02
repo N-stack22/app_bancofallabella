@@ -1,10 +1,10 @@
 import 'dart:convert';
 
+import 'package:bancofalabella_app2/services/scoring_repository.dart';
 import 'package:bancofalabella_app2/supabase_config.dart';
 import 'package:bancofalabella_app2/views/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -36,25 +36,13 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => loading = true);
 
     try {
-      if (!SupabaseConfig.isConfigured) {
-        await _signInWithCore(
-          emailController.text.trim(),
-          passwordController.text.trim(),
-        );
-        return;
-      }
-
-      await Supabase.instance.client.auth.signInWithPassword(
-        email: _loginToEmail(emailController.text.trim()),
-        password: passwordController.text.trim(),
+      await _signInWithCore(
+        emailController.text.trim(),
+        passwordController.text.trim(),
       );
-      failedAttempts = 0;
-    } on AuthException catch (error) {
+    } catch (error) {
       registerFailedAttempt();
-      showMessage(error.message);
-    } catch (_) {
-      registerFailedAttempt();
-      showMessage('No se pudo iniciar sesion. Revisa tu conexion o Supabase.');
+      showMessage(error.toString());
     } finally {
       if (mounted) {
         setState(() => loading = false);
@@ -88,16 +76,25 @@ class _LoginPageState extends State<LoginPage> {
         )
         .timeout(const Duration(seconds: 25));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      registerFailedAttempt();
-      showMessage(_coreErrorMessage(response));
-      return;
+      throw StateError(_coreErrorMessage(response));
     }
+    final body = jsonDecode(response.body);
+    if (body is! Map || body['access_token'] == null) {
+      throw StateError('El Core no devolvio una sesion valida.');
+    }
+    final advisor = body['asesor'] is Map
+        ? Map<String, dynamic>.from(body['asesor'] as Map)
+        : <String, dynamic>{};
+    await ScoringRepository.saveCoreSession(
+      token: body['access_token'].toString(),
+      advisor: advisor,
+    );
     failedAttempts = 0;
     lockedUntil = null;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => HomePage(userEmail: _loginToEmail(username)),
+        builder: (_) => HomePage(userEmail: _advisorEmail(advisor, username)),
       ),
     );
   }
@@ -112,6 +109,11 @@ class _LoginPageState extends State<LoginPage> {
     if (response.statusCode == 401) return 'Credenciales invalidas';
     if (response.statusCode == 423) return 'Cuenta bloqueada temporalmente';
     return 'No se pudo iniciar sesion contra el Core.';
+  }
+
+  String _advisorEmail(Map<String, dynamic> advisor, String username) {
+    final code = (advisor['codigo_empleado'] ?? username).toString().trim();
+    return _loginToEmail(code);
   }
 
   String _loginToEmail(String value) {

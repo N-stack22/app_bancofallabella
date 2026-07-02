@@ -495,9 +495,38 @@ class FieldScoringResult {
 class ScoringRepository {
   static const _dashboardCacheKey = 'fv_dashboard_cache_v1';
   static const _pendingQueueKey = 'fv_pending_queue_v1';
+  static const coreTokenKey = 'fv_core_access_token_v1';
+  static const coreAdvisorKey = 'fv_core_advisor_v1';
 
   SalesDashboardData? _cachedDashboard;
   DateTime? _cachedAt;
+
+  static Future<void> saveCoreSession({
+    required String token,
+    required Map<String, dynamic> advisor,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(coreTokenKey, token);
+    await prefs.setString(coreAdvisorKey, jsonEncode(_jsonSafe(advisor)));
+  }
+
+  static Future<String?> readCoreToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(coreTokenKey);
+    return token == null || token.trim().isEmpty ? null : token.trim();
+  }
+
+  static Future<Map<String, dynamic>?> readCoreAdvisor() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(coreAdvisorKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final json = jsonDecode(raw);
+      return json is Map ? Map<String, dynamic>.from(json) : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<SalesDashboardData> loadDashboard({bool forceRefresh = false}) async {
     final now = DateTime.now();
@@ -515,14 +544,20 @@ class ScoringRepository {
       return data;
     }
 
-    if (!SupabaseConfig.isConfigured) {
+    if (await readCoreToken() != null) {
       try {
         return remember(await _loadDashboardFromCore());
-      } catch (_) {
+      } catch (error) {
         final cached = await _loadDashboard();
         if (cached != null) return remember(cached);
-        rethrow;
+        throw StateError('No se pudo cargar datos desde el Core: $error');
       }
+    }
+
+    if (!SupabaseConfig.isConfigured) {
+      final cached = await _loadDashboard();
+      if (cached != null) return remember(cached);
+      throw StateError('No hay sesion Core activa para cargar cartera real.');
     }
 
     final client = Supabase.instance.client;
@@ -630,11 +665,11 @@ class ScoringRepository {
 
   Future<SalesDashboardData> _loadDashboardFromCore() async {
     final rows = await Future.wait<dynamic>([
-      _getCoreJson('/casos/dashboard'),
-      _getCoreJson('/cartera/demo'),
-      _getCoreJson('/solicitudes/demo'),
+      _getCoreJson('/auth/me'),
+      _getCoreJson('/cartera'),
+      _getCoreJson('/solicitudes'),
     ]);
-    final dashboard = _asMap(rows[0]);
+    final me = _asMap(rows[0]);
     final cartera = _asList(rows[1]);
     final requests = _asList(rows[2]);
     final portfolio = cartera.map(_clientFromCoreCartera).toList();
@@ -644,33 +679,29 @@ class ScoringRepository {
     final conversion = portfolio.isEmpty
         ? 0
         : (visitados / portfolio.length) * 100;
-    final advisor = {
-      'id': 'core-asesor-0001',
-      'codigo': '0001',
-      'cod_asesor': '0001',
-      'nombre_completo': 'Asesor Core Banco Falabella',
-      'email': 'asesor0001@bancofalabella.local',
-      'agencia': 'Core Railway',
-      'nivel': 'Asesor',
-      'perfil': 'asesor',
-    };
+    final advisor = _advisorFromCoreSession(
+      stored: await readCoreAdvisor(),
+      payload: _asMap(me['asesor']),
+    );
     return SalesDashboardData(
       advisor: advisor,
       portfolio: portfolio,
-      agencies: const [
+      agencies: [
         {
-          'id': 'core-agencia-0001',
-          'agencia': 'Core Railway',
-          'nombre': 'Core Railway',
-          'region': 'Demo',
+          'id': _text(advisor, 'agencia_id', fallback: 'core-agencia'),
+          'agencia': _text(advisor, 'agencia', fallback: 'Agencia asignada'),
+          'nombre': _text(advisor, 'agencia', fallback: 'Agencia asignada'),
+          'region': 'Produccion',
           'total_asesores': 1,
         },
       ],
       advisors: [advisor],
       kpis: [
         {
-          'agencia': 'Core Railway',
-          'desembolsos': _number(dashboard, 'desembolsados'),
+          'agencia': _text(advisor, 'agencia', fallback: 'Agencia asignada'),
+          'desembolsos': requests
+              .where((item) => _text(item, 'estado') == 'desembolsado')
+              .length,
           'mora_30_pct': 0,
           'tasa_conversion_pct': conversion,
         },
@@ -696,19 +727,47 @@ class ScoringRepository {
       collections: const [],
       pendingSync: 0,
       lastSyncLabel: 'Core ${_timeLabel(DateTime.now())}',
-      role: 'asesor',
+      role: _text(advisor, 'perfil', fallback: 'asesor'),
       online: true,
     );
   }
 
   Future<dynamic> _getCoreJson(String path) async {
     final response = await http
-        .get(Uri.parse('${SupabaseConfig.coreBaseUrl}$path'))
+        .get(
+          Uri.parse('${SupabaseConfig.coreBaseUrl}$path'),
+          headers: await _coreHeaders(),
+        )
         .timeout(const Duration(seconds: 25));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Core ${response.statusCode}: ${response.body}');
     }
     return jsonDecode(response.body);
+  }
+
+  Future<dynamic> _postCoreJson(String path, Map<String, dynamic> body) async {
+    final response = await http
+        .post(
+          Uri.parse('${SupabaseConfig.coreBaseUrl}$path'),
+          headers: await _coreHeaders(contentJson: true),
+          body: jsonEncode(_jsonSafe(body)),
+        )
+        .timeout(const Duration(seconds: 25));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Core ${response.statusCode}: ${response.body}');
+    }
+    return response.body.isEmpty ? null : jsonDecode(response.body);
+  }
+
+  Future<Map<String, String>> _coreHeaders({bool contentJson = false}) async {
+    final token = await readCoreToken();
+    if (token == null || token.isEmpty) {
+      throw StateError('No hay sesion Core activa.');
+    }
+    return {
+      if (contentJson) 'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
   }
 
   PreapprovedClient _clientFromCoreCartera(Map<String, dynamic> item) {
@@ -739,8 +798,8 @@ class ScoringRepository {
         'numero_documento': _text(item, 'documento'),
         'dni': _text(item, 'documento'),
         'tipo_negocio': _text(item, 'tipo_gestion', fallback: 'Negocio'),
-        'distrito': 'Core Railway',
-        'direccion': 'Core Railway',
+        'distrito': 'Cartera asignada',
+        'direccion': 'Cartera asignada',
         'lat_negocio': _number(item, 'lat'),
         'lng_negocio': _number(item, 'lng'),
       },
@@ -783,14 +842,43 @@ class ScoringRepository {
     required String advisorName,
     required String agency,
   }) async {
-    if (!SupabaseConfig.isConfigured) return;
-
-    final supabase = Supabase.instance.client;
     final estadoCredito = result.disqualified
         ? 'rechazado'
         : 'visita_realizada';
-
     final assignmentId = _text(client.assignment, 'id');
+
+    if (await readCoreToken() != null) {
+      if (assignmentId.isEmpty) {
+        throw StateError('La cartera no tiene id de asignacion.');
+      }
+      await _postCoreJson('/cartera/$assignmentId/visita', {
+        'resultado': result.disqualified ? 'no_encontrado' : 'visitado',
+        'observacion':
+            '$advisorName - $agency - ${input.recomendacion}: ${input.observaciones}',
+        'lat': client.lat == 0 ? null : client.lat,
+        'lng': client.lng == 0 ? null : client.lng,
+      });
+      await _postCoreJson('/cartera/$assignmentId/comite', {
+        'asesor_nombre': advisorName,
+        'agencia': agency,
+        'score_transaccional': client.scoreValue.round(),
+        'score_campo': result.scoreCampo,
+        'score_final': result.scoreFinal,
+        'segmento': result.segment,
+        'monto_propuesto': result.disqualified ? 0 : result.maxAmount,
+        'plazo_meses': result.suggestedTerm,
+        'cuota_estimada': result.payment,
+        'recomendacion': input.recomendacion,
+        'observaciones': input.observaciones,
+      });
+      return;
+    }
+
+    if (!SupabaseConfig.isConfigured) {
+      throw StateError('No hay conexion productiva para enviar la ficha.');
+    }
+
+    final supabase = Supabase.instance.client;
     if (assignmentId.isNotEmpty) {
       await supabase
           .from('cartera_diaria')
@@ -850,10 +938,23 @@ class ScoringRepository {
     required String result,
     required String observation,
   }) async {
-    if (!SupabaseConfig.isConfigured) return;
-    final supabase = Supabase.instance.client;
     final assignmentId = _text(client.assignment, 'id');
     if (assignmentId.isEmpty) return;
+
+    if (await readCoreToken() != null) {
+      await _postCoreJson('/cartera/$assignmentId/visita', {
+        'resultado': result,
+        'observacion': observation,
+        'lat': client.lat == 0 ? null : client.lat,
+        'lng': client.lng == 0 ? null : client.lng,
+      });
+      return;
+    }
+
+    if (!SupabaseConfig.isConfigured) {
+      throw StateError('No hay conexion productiva para registrar la visita.');
+    }
+    final supabase = Supabase.instance.client;
 
     final payload = {
       'estado_visita': result == 'visitado' ? 'visitado' : result,
@@ -886,7 +987,43 @@ class ScoringRepository {
     required String signature,
   }) async {
     final factor = paymentFactor(0.60, term);
-    if (!SupabaseConfig.isConfigured) return;
+    if (await readCoreToken() != null) {
+      await _postCoreJson('/solicitudes', {
+        'numero_documento': _text(
+          client.profile,
+          'numero_documento',
+          fallback: _text(client.profile, 'dni'),
+        ),
+        'nombres': _text(client.profile, 'nombres'),
+        'apellidos': _text(client.profile, 'apellidos'),
+        'telefono': _nullableText(_text(client.profile, 'telefono')),
+        'tipo_negocio': client.business,
+        'nombre_negocio': _nullableText(
+          _text(client.profile, 'nombre_negocio'),
+        ),
+        'ingresos_estimados': _number(
+          client.score,
+          'ingreso_promedio_ref',
+          fallback: 3000,
+        ),
+        'monto_solicitado': amount,
+        'plazo_meses': term,
+        'moneda': 'PEN',
+        'tipo_cuota': 'mensual',
+        'garantia': 'sin_garantia',
+        'destino_credito': purpose,
+        'cuota_estimada': amount * factor,
+        'tea_referencial': 0.60,
+        'firma_cliente_base64': signature,
+      });
+      return;
+    }
+
+    if (!SupabaseConfig.isConfigured) {
+      throw StateError(
+        'No hay conexion productiva para transmitir la solicitud.',
+      );
+    }
     final supabase = Supabase.instance.client;
     final now = DateTime.now();
     final expediente =
@@ -963,22 +1100,33 @@ class ScoringRepository {
     final url = supabase.storage
         .from(SupabaseConfig.documentsBucket)
         .getPublicUrl(path);
-    final requests = await _optionalList(
-      supabase
-          .from('solicitudes_credito')
-          .select('id')
-          .eq('cliente_id', client.userId)
-          .order('created_at', ascending: false)
-          .limit(1),
-    );
-    if (requests.isNotEmpty) {
-      await supabase.from('solicitudes_documentos').insert({
-        'solicitud_id': _text(requests.first, 'id'),
+    final hasCoreSession = await readCoreToken() != null;
+    final solicitudId = _text(client.assignment, 'solicitud_id');
+    if (solicitudId.isNotEmpty && hasCoreSession) {
+      await _postCoreJson('/solicitudes/$solicitudId/documentos', {
         'tipo_documento': type,
         'storage_url': url,
         'tamanio_kb': (bytes.length / 1024).round(),
         'nitidez_score': min(100, bytes.length / 2048),
       });
+    } else {
+      final requests = await _optionalList(
+        supabase
+            .from('solicitudes_credito')
+            .select('id')
+            .eq('cliente_id', client.userId)
+            .order('created_at', ascending: false)
+            .limit(1),
+      );
+      if (requests.isNotEmpty) {
+        await supabase.from('solicitudes_documentos').insert({
+          'solicitud_id': _text(requests.first, 'id'),
+          'tipo_documento': type,
+          'storage_url': url,
+          'tamanio_kb': (bytes.length / 1024).round(),
+          'nitidez_score': min(100, bytes.length / 2048),
+        });
+      }
     }
     return url;
   }
@@ -1004,20 +1152,37 @@ class ScoringRepository {
     final url = supabase.storage
         .from(SupabaseConfig.documentsBucket)
         .getPublicUrl(path);
-    final requests = await _optionalList(
-      supabase
-          .from('solicitudes_credito')
-          .select('id')
-          .eq('numero_expediente', expediente)
-          .limit(1),
-    );
-    if (requests.isNotEmpty) {
-      await supabase.from('sync_outbox').insert({
-        'entidad': 'pdf_expediente',
-        'entidad_id': _text(requests.first, 'id'),
-        'operacion': 'create',
-        'payload': {'numero_expediente': expediente, 'storage_url': url},
-      });
+    if (await readCoreToken() != null) {
+      final solicitudes = _asList(await _getCoreJson('/solicitudes'));
+      final solicitud = solicitudes.firstWhere(
+        (item) => _text(item, 'numero_expediente') == expediente,
+        orElse: () => const <String, dynamic>{},
+      );
+      final solicitudId = _text(solicitud, 'id');
+      if (solicitudId.isNotEmpty) {
+        await _postCoreJson('/solicitudes/$solicitudId/documentos', {
+          'tipo_documento': 'pdf_expediente',
+          'storage_url': url,
+          'tamanio_kb': (bytes.length / 1024).round(),
+          'nitidez_score': 100,
+        });
+      }
+    } else {
+      final requests = await _optionalList(
+        supabase
+            .from('solicitudes_credito')
+            .select('id')
+            .eq('numero_expediente', expediente)
+            .limit(1),
+      );
+      if (requests.isNotEmpty) {
+        await supabase.from('sync_outbox').insert({
+          'entidad': 'pdf_expediente',
+          'entidad_id': _text(requests.first, 'id'),
+          'operacion': 'create',
+          'payload': {'numero_expediente': expediente, 'storage_url': url},
+        });
+      }
     }
   }
 
@@ -1028,6 +1193,8 @@ class ScoringRepository {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_dashboardCacheKey);
     await prefs.remove(_pendingQueueKey);
+    await prefs.remove(coreTokenKey);
+    await prefs.remove(coreAdvisorKey);
   }
 
   Future<void> _saveDashboard(SalesDashboardData data) async {
@@ -1219,6 +1386,37 @@ class ScoringRepository {
     }
     final agency = agenciesById[_text(row, 'agencia_id')] ?? const {};
     return _advisorFromCoreSchema(row: row, agency: agency, email: email);
+  }
+
+  static Map<String, dynamic> _advisorFromCoreSession({
+    required Map<String, dynamic>? stored,
+    required Map<String, dynamic> payload,
+  }) {
+    final row = stored ?? const <String, dynamic>{};
+    final code = _text(
+      row,
+      'codigo_empleado',
+      fallback: _text(payload, 'sub', fallback: _text(row, 'codigo')),
+    );
+    final fullName = '${_text(row, 'nombres')} ${_text(row, 'apellidos')}'
+        .trim();
+    final payloadName = _text(payload, 'nombre');
+    final profile = _text(row, 'perfil', fallback: _text(payload, 'perfil'));
+    return {
+      ...row,
+      'id': _text(row, 'id', fallback: _text(payload, 'asesor_id')),
+      'codigo': code,
+      'cod_asesor': code,
+      'codigo_empleado': code,
+      'nombre_completo': fullName.isNotEmpty
+          ? fullName
+          : (payloadName.isNotEmpty ? payloadName : 'Asesor Banco Falabella'),
+      'email': code.isEmpty ? '' : 'asesor$code@bancofalabella.local',
+      'agencia': 'Agencia asignada',
+      'nivel': _prettyProfile(profile),
+      'perfil': profile.isEmpty ? 'asesor' : profile,
+      'agencia_id': _text(row, 'agencia_id'),
+    };
   }
 
   static Map<String, dynamic> _advisorFromCoreSchema({

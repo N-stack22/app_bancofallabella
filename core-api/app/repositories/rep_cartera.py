@@ -13,6 +13,10 @@ def primer_asesor_activo(db: Session) -> str | None:
             """SELECT id
                FROM asesores
                WHERE activo = TRUE
+                 AND lower(replace(COALESCE(perfil, ''), '-', '_')) IN (
+                   'asesor', 'operador', 'asesor_negocios',
+                   'asesor de negocios', 'asesor_de_negocios'
+                 )
                ORDER BY created_at NULLS LAST
                LIMIT 1"""
         )
@@ -27,11 +31,12 @@ def listar_por_asesor(db: Session, asesor_id: str, fecha: date) -> list[dict]:
                       c.score_prioridad, c.monto_credito, c.estado_visita,
                       c.orden_manual, c.fecha_asignacion, c.timestamp_visita,
                       cli.nombres, cli.apellidos, cli.numero_documento,
-                      cli.lat, cli.lng, s.numero_expediente, s.created_at
+                      cli.lat, cli.lng, s.solicitud_id, s.numero_expediente,
+                      s.created_at
                FROM cartera_diaria c
                JOIN clientes cli ON cli.id = c.cliente_id
                LEFT JOIN LATERAL (
-                   SELECT numero_expediente, created_at
+                   SELECT id AS solicitud_id, numero_expediente, created_at
                    FROM solicitudes_credito
                    WHERE cliente_id = c.cliente_id
                    ORDER BY created_at DESC
@@ -47,6 +52,7 @@ def listar_por_asesor(db: Session, asesor_id: str, fecha: date) -> list[dict]:
         {
             "id": str(r["id"]),
             "cliente_id": str(r["cliente_id"]),
+            "solicitud_id": str(r["solicitud_id"]) if r["solicitud_id"] else None,
             "cliente_nombre": f"{r['nombres']} {r['apellidos']}",
             "documento": r["numero_documento"],
             "numero_expediente": r["numero_expediente"],

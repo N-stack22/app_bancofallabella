@@ -386,6 +386,36 @@ def _uuid_from_document(numero_documento: str) -> str:
     return f"22222222-3333-4444-8555-{suffix}"
 
 
+def asegurar_cliente_login_real(db: Session, numero_documento: str) -> bool:
+    """Crea/actualiza el acceso movil para un cliente existente en la BD."""
+    cliente = db.execute(
+        text("SELECT id FROM clientes WHERE numero_documento = :doc"),
+        {"doc": numero_documento},
+    ).mappings().first()
+    if not cliente:
+        return False
+    db.execute(
+        text(
+            """INSERT INTO usuarios_cliente
+                 (id, cliente_id, username, password_hash, activo, bloqueado, intentos_fallidos)
+               VALUES (:id, :cliente_id, :username, :password_hash, TRUE, FALSE, 0)
+               ON CONFLICT (username) DO UPDATE
+               SET password_hash = EXCLUDED.password_hash,
+                   activo = TRUE,
+                   bloqueado = FALSE,
+                   intentos_fallidos = 0"""
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "cliente_id": str(cliente["id"]),
+            "username": numero_documento,
+            "password_hash": hash_password("12345"),
+        },
+    )
+    db.commit()
+    return True
+
+
 def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:
     """Crea la credencial demo de App Clientes si aun no existe."""
     cliente = db.execute(

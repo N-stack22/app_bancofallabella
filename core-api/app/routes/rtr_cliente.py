@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.cfg_database import get_db
 from app.core.cfg_auth import get_current_cliente
-from app.core.cfg_security import create_access_token
 from app.schemas.sch_cliente import (
     LoginClienteIn, TokenClienteOut, ClienteOut, CuentaAhorroOut, CreditoOut,
     CuotaOut, MovimientoOut, TarjetaOut, NotificacionOut, OperacionIn, OperacionOut,
@@ -27,19 +26,14 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
     try:
         result = ctl_auth_cliente.login(db, data.numero_documento, data.password)
     except Exception:
-        if data.password != "12345":
-            raise HTTPException(status_code=401, detail="Credenciales invalidas")
         db.rollback()
-        return _login_cliente_demo(data, db)
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo validar el cliente en la base de datos.",
+        )
     if result and result.get("_bloqueado"):
-        if data.password == "12345":
-            db.rollback()
-            return _login_cliente_demo(data, db)
         raise HTTPException(status_code=423, detail="Usuario bloqueado por intentos fallidos")
     if not result:
-        if data.password == "12345":
-            db.rollback()
-            return _login_cliente_demo(data, db)
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
     return result
 
@@ -134,7 +128,10 @@ def crear_solicitud_cliente(
             return rep_solicitudes.crear_desde_cliente(db, body)
         except Exception as retry_exc:
             db.rollback()
-            return rep_solicitudes.crear_desde_cliente_fallback(body)
+            raise HTTPException(
+                status_code=500,
+                detail=f"No se pudo guardar la solicitud en la base de datos: {retry_exc}",
+            )
 
 
 @router.get("/solicitudes", response_model=list[SolicitudResumen])
@@ -166,36 +163,18 @@ def resumen_cliente(db: Session = Depends(get_db), cli: dict = Depends(get_curre
     """Resumen homebanking protegido por token del cliente."""
     cliente = rep_cliente.get_cliente(db, cli["cliente_id"])
     if not cliente:
-        data = rep_cliente.resumen_demo_fallback(cli.get("sub", ""))
-        if data:
-            return data
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     try:
         data = rep_cliente.resumen_demo_por_documento(db, cliente.numero_documento)
-    except Exception:
-        data = rep_cliente.resumen_demo_fallback(cliente.numero_documento)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo cargar el resumen del cliente: {exc}",
+        )
     if not data:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return data
-
-
-def _login_cliente_demo(data: LoginClienteIn, db: Session):
-    cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
-    if cliente is None:
-        raise HTTPException(status_code=401, detail="Cliente demo no registrado")
-    try:
-        rep_cliente.asegurar_cliente_demo_login(db, data.numero_documento)
-        result = ctl_auth_cliente.login(db, data.numero_documento, data.password)
-        if result:
-            return result
-    except Exception:
-        db.rollback()
-    token = create_access_token({
-        "sub": data.numero_documento,
-        "cliente_id": cliente["id"],
-        "nombre": f"{cliente['nombres']} {cliente['apellidos']}",
-    })
-    return {"access_token": token, "token_type": "bearer", "cliente": cliente}
 
 
 @router.get("/demo/{numero_documento}/resumen")
