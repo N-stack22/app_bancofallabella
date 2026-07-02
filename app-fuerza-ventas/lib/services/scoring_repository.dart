@@ -1,7 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:bancofalabella_app2/supabase_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SalesDashboardData {
@@ -36,6 +39,67 @@ class SalesDashboardData {
   final String lastSyncLabel;
   final String role;
   final bool online;
+
+  SalesDashboardData copyWith({
+    int? pendingSync,
+    String? lastSyncLabel,
+    bool? online,
+  }) {
+    return SalesDashboardData(
+      advisor: advisor,
+      portfolio: portfolio,
+      agencies: agencies,
+      advisors: advisors,
+      kpis: kpis,
+      history: history,
+      requests: requests,
+      bureau: bureau,
+      alerts: alerts,
+      collections: collections,
+      pendingSync: pendingSync ?? this.pendingSync,
+      lastSyncLabel: lastSyncLabel ?? this.lastSyncLabel,
+      role: role,
+      online: online ?? this.online,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'advisor': advisor,
+    'portfolio': portfolio.map((client) => client.toJson()).toList(),
+    'agencies': agencies,
+    'advisors': advisors,
+    'kpis': kpis,
+    'history': history,
+    'requests': requests,
+    'bureau': bureau,
+    'alerts': alerts,
+    'collections': collections,
+    'pendingSync': pendingSync,
+    'lastSyncLabel': lastSyncLabel,
+    'role': role,
+    'online': online,
+  };
+
+  factory SalesDashboardData.fromJson(Map<String, dynamic> json) {
+    return SalesDashboardData(
+      advisor: _asMap(json['advisor']),
+      portfolio: _asList(
+        json['portfolio'],
+      ).map(PreapprovedClient.fromJson).toList(),
+      agencies: _asList(json['agencies']),
+      advisors: _asList(json['advisors']),
+      kpis: _asList(json['kpis']),
+      history: _asList(json['history']),
+      requests: _asList(json['requests']),
+      bureau: _asList(json['bureau']),
+      alerts: _asList(json['alerts']),
+      collections: _asList(json['collections']),
+      pendingSync: _number(json, 'pendingSync').toInt(),
+      lastSyncLabel: _text(json, 'lastSyncLabel'),
+      role: _text(json, 'role', fallback: 'Operador'),
+      online: json['online'] == true,
+    );
+  }
 }
 
 class PreapprovedClient {
@@ -52,6 +116,24 @@ class PreapprovedClient {
   final Map<String, dynamic> score;
   final Map<String, dynamic> fieldFile;
   final Map<String, dynamic> assignment;
+
+  factory PreapprovedClient.fromJson(Map<String, dynamic> json) {
+    return PreapprovedClient(
+      credit: _asMap(json['credit']),
+      profile: _asMap(json['profile']),
+      score: _asMap(json['score']),
+      fieldFile: _asMap(json['fieldFile']),
+      assignment: _asMap(json['assignment']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'credit': credit,
+    'profile': profile,
+    'score': score,
+    'fieldFile': fieldFile,
+    'assignment': assignment,
+  };
 
   String get id =>
       _text(credit, 'id', fallback: _text(assignment, 'id', fallback: userId));
@@ -410,6 +492,9 @@ class FieldScoringResult {
 }
 
 class ScoringRepository {
+  static const _dashboardCacheKey = 'fv_dashboard_cache_v1';
+  static const _pendingQueueKey = 'fv_pending_queue_v1';
+
   SalesDashboardData? _cachedDashboard;
   DateTime? _cachedAt;
 
@@ -425,10 +510,13 @@ class ScoringRepository {
     SalesDashboardData remember(SalesDashboardData data) {
       _cachedDashboard = data;
       _cachedAt = DateTime.now();
+      unawaited(_saveDashboard(data));
       return data;
     }
 
     if (!SupabaseConfig.isConfigured) {
+      final cached = await _loadDashboard();
+      if (cached != null) return remember(cached);
       throw StateError(
         'Supabase no esta configurado. Falta SUPABASE_ANON_KEY en el APK.',
       );
@@ -459,6 +547,7 @@ class ScoringRepository {
         );
       }
       final advisorId = _text(advisor, 'id');
+      await _flushQueuedMutations(client);
 
       final portfolioBundle = await _loadPortfolioFromCoreSchema(
         supabase: client,
@@ -497,6 +586,7 @@ class ScoringRepository {
       final alerts = _asList(rows[2]);
       final collections = _asList(rows[3]);
       final pendingRows = _asList(rows[4]);
+      final localPending = await _pendingQueueCount();
 
       return remember(
         SalesDashboardData(
@@ -521,13 +611,16 @@ class ScoringRepository {
           collections: collections,
           pendingSync:
               pendingRows.length +
-              requests.where((item) => item['pendiente_sync'] == true).length,
+              requests.where((item) => item['pendiente_sync'] == true).length +
+              localPending,
           lastSyncLabel: 'hoy ${_timeLabel(DateTime.now())}',
           role: _text(advisor, 'perfil', fallback: 'Operador'),
           online: true,
         ),
       );
     } catch (error) {
+      final cached = await _loadDashboard();
+      if (cached != null) return remember(cached);
       throw StateError('No se pudo cargar datos desde Supabase: $error');
     }
   }
@@ -611,17 +704,26 @@ class ScoringRepository {
     final assignmentId = _text(client.assignment, 'id');
     if (assignmentId.isEmpty) return;
 
-    await supabase
-        .from('cartera_diaria')
-        .update({
-          'estado_visita': result == 'visitado' ? 'visitado' : result,
-          'resultado_visita': result,
-          'observacion_visita': observation,
-          'timestamp_visita': DateTime.now().toIso8601String(),
-          'lat_visita': client.lat,
-          'lng_visita': client.lng,
-        })
-        .eq('id', assignmentId);
+    final payload = {
+      'estado_visita': result == 'visitado' ? 'visitado' : result,
+      'resultado_visita': result,
+      'observacion_visita': observation,
+      'timestamp_visita': DateTime.now().toIso8601String(),
+      'lat_visita': client.lat,
+      'lng_visita': client.lng,
+    };
+    try {
+      await supabase
+          .from('cartera_diaria')
+          .update(payload)
+          .eq('id', assignmentId);
+    } catch (_) {
+      await _queuePendingMutation({
+        'type': 'visit_result',
+        'assignment_id': assignmentId,
+        'payload': payload,
+      });
+    }
   }
 
   Future<void> submitCreditApplication({
@@ -642,7 +744,7 @@ class ScoringRepository {
     if (advisorId.isEmpty || client.userId.isEmpty) {
       throw StateError('No se encontro asesor o cliente valido en Supabase.');
     }
-    await supabase.from('solicitudes_credito').insert({
+    final payload = {
       'numero_expediente': expediente,
       'asesor_id': advisorId,
       'cliente_id': client.userId,
@@ -671,7 +773,15 @@ class ScoringRepository {
       'lat_captura': client.lat,
       'lng_captura': client.lng,
       'pendiente_sync': true,
-    });
+    };
+    try {
+      await supabase.from('solicitudes_credito').insert(payload);
+    } catch (_) {
+      await _queuePendingMutation({
+        'type': 'credit_application',
+        'payload': payload,
+      });
+    }
   }
 
   Future<String> uploadDocument({
@@ -764,6 +874,75 @@ class ScoringRepository {
     if (SupabaseConfig.isConfigured) {
       await Supabase.instance.client.auth.signOut();
     }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_dashboardCacheKey);
+    await prefs.remove(_pendingQueueKey);
+  }
+
+  Future<void> _saveDashboard(SalesDashboardData data) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _dashboardCacheKey,
+      jsonEncode(_jsonSafe(data.toJson())),
+    );
+  }
+
+  Future<SalesDashboardData?> _loadDashboard() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_dashboardCacheKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final json = jsonDecode(raw);
+      if (json is! Map) return null;
+      final pending = await _pendingQueueCount();
+      return SalesDashboardData.fromJson(
+        Map<String, dynamic>.from(json),
+      ).copyWith(
+        online: false,
+        pendingSync: pending,
+        lastSyncLabel: 'cache local',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _queuePendingMutation(Map<String, dynamic> mutation) async {
+    final prefs = await SharedPreferences.getInstance();
+    final queue = _decodeQueue(prefs.getString(_pendingQueueKey));
+    queue.add({...mutation, 'queued_at': DateTime.now().toIso8601String()});
+    await prefs.setString(_pendingQueueKey, jsonEncode(_jsonSafe(queue)));
+  }
+
+  Future<int> _pendingQueueCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    return _decodeQueue(prefs.getString(_pendingQueueKey)).length;
+  }
+
+  Future<void> _flushQueuedMutations(SupabaseClient supabase) async {
+    final prefs = await SharedPreferences.getInstance();
+    final queue = _decodeQueue(prefs.getString(_pendingQueueKey));
+    if (queue.isEmpty) return;
+    final remaining = <Map<String, dynamic>>[];
+    for (final item in queue) {
+      try {
+        final type = _text(item, 'type');
+        final payload = _asMap(item['payload']);
+        if (type == 'visit_result') {
+          await supabase
+              .from('cartera_diaria')
+              .update(payload)
+              .eq('id', _text(item, 'assignment_id'));
+        } else if (type == 'credit_application') {
+          await supabase.from('solicitudes_credito').insert(payload);
+        } else {
+          remaining.add(item);
+        }
+      } catch (_) {
+        remaining.add(item);
+      }
+    }
+    await prefs.setString(_pendingQueueKey, jsonEncode(_jsonSafe(remaining)));
   }
 
   Future<_PortfolioBundle> _loadPortfolioFromCoreSchema({
@@ -1285,6 +1464,42 @@ class ScoringRepository {
   static String _timeLabel(DateTime dateTime) {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
+}
+
+Map<String, dynamic> _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return <String, dynamic>{};
+}
+
+List<Map<String, dynamic>> _asList(dynamic value) {
+  if (value is List) return value.map((item) => _asMap(item)).toList();
+  return const <Map<String, dynamic>>[];
+}
+
+List<Map<String, dynamic>> _decodeQueue(String? raw) {
+  if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+  try {
+    final value = jsonDecode(raw);
+    return _asList(value);
+  } catch (_) {
+    return <Map<String, dynamic>>[];
+  }
+}
+
+dynamic _jsonSafe(dynamic value) {
+  if (value == null || value is num || value is bool || value is String) {
+    return value;
+  }
+  if (value is List) return value.map(_jsonSafe).toList();
+  if (value is Map) {
+    return {
+      for (final entry in value.entries)
+        entry.key.toString(): _jsonSafe(entry.value),
+    };
+  }
+  if (value is DateTime) return value.toIso8601String();
+  return value.toString();
 }
 
 String _text(Map<String, dynamic> map, String key, {String fallback = ''}) {

@@ -78,6 +78,9 @@ def cronograma(
     db: Session = Depends(get_db),
     cli: dict = Depends(get_current_cliente),
 ):
+    creditos_cliente = rep_cliente.creditos(db, cli["cliente_id"])
+    if not any(c.cod_cuenta_credito == cod_cuenta_credito for c in creditos_cliente):
+        raise HTTPException(status_code=404, detail="Credito no encontrado para el cliente")
     return rep_cliente.cronograma(db, cod_cuenta_credito)
 
 
@@ -127,9 +130,17 @@ def crear_operacion(
 def crear_solicitud_cliente(
     data: SolicitudIn,
     db: Session = Depends(get_db),
+    cli: dict = Depends(get_current_cliente),
 ):
     """Registra una solicitud desde la App Clientes y la asigna a cartera."""
     body = data.model_dump()
+    cliente = rep_cliente.get_cliente(db, cli["cliente_id"])
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    body["numero_documento"] = cliente.numero_documento
+    body["nombres"] = cliente.nombres
+    body["apellidos"] = cliente.apellidos
+    body["telefono"] = cliente.telefono
     try:
         return rep_solicitudes.crear_desde_cliente(db, body)
     except Exception as exc:
@@ -142,13 +153,43 @@ def crear_solicitud_cliente(
             return rep_solicitudes.crear_desde_cliente_fallback(body)
 
 
+@router.get("/solicitudes", response_model=list[SolicitudResumen])
+def listar_solicitudes_propias(
+    db: Session = Depends(get_db),
+    cli: dict = Depends(get_current_cliente),
+):
+    """Seguimiento de expedientes del cliente autenticado."""
+    cliente = rep_cliente.get_cliente(db, cli["cliente_id"])
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return rep_solicitudes.listar_por_documento(db, cliente.numero_documento)
+
+
 @router.get("/solicitudes/{numero_documento}", response_model=list[SolicitudResumen])
 def listar_solicitudes_cliente(
     numero_documento: str,
     db: Session = Depends(get_db),
+    cli: dict = Depends(get_current_cliente),
 ):
     """Seguimiento del expediente por documento del cliente."""
+    if numero_documento != cli.get("sub"):
+        raise HTTPException(status_code=403, detail="No puede consultar solicitudes de otro cliente")
     return rep_solicitudes.listar_por_documento(db, numero_documento)
+
+
+@router.get("/resumen")
+def resumen_cliente(db: Session = Depends(get_db), cli: dict = Depends(get_current_cliente)):
+    """Resumen homebanking protegido por token del cliente."""
+    cliente = rep_cliente.get_cliente(db, cli["cliente_id"])
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    try:
+        data = rep_cliente.resumen_demo_por_documento(db, cliente.numero_documento)
+    except Exception:
+        data = rep_cliente.resumen_demo_fallback(cliente.numero_documento)
+    if not data:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return data
 
 
 @router.get("/demo/{numero_documento}/resumen")

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Briefcase, MapPin, CheckCircle2, FileText, RefreshCw, ClipboardCheck, IdCard,
+  Briefcase, MapPin, CheckCircle2, FileText, RefreshCw, ClipboardCheck, IdCard, Users, Search,
 } from 'lucide-react'
 import PageHead from '../components/layout/PageHead.jsx'
 import Loader from '../components/ui/Loader.jsx'
@@ -10,6 +10,7 @@ import Badge from '../components/ui/Badge.jsx'
 import Money from '../components/ui/Money.jsx'
 import Modal from '../components/ui/Modal.jsx'
 import { listarCartera, marcarVisita } from '../services/carteraService.js'
+import { listarClientes } from '../services/clientesService.js'
 import { extractError, formatDateTime, humanizar } from '../utils/format.js'
 
 const RESULTADOS = [
@@ -22,9 +23,12 @@ const RESULTADOS = [
 export default function CarteraPage() {
   const navigate = useNavigate()
   const [items, setItems] = useState([])
+  const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [ok, setOk] = useState(null)
+  const [vista, setVista] = useState('clientes')
+  const [busqueda, setBusqueda] = useState('')
   const [target, setTarget] = useState(null)
   const [resultado, setResultado] = useState('visitado')
   const [observacion, setObservacion] = useState('')
@@ -32,11 +36,20 @@ export default function CarteraPage() {
 
   const cargar = useCallback(() => {
     setLoading(true)
-    listarCartera()
-      .then((data) => setItems(data || []))
-      .catch((err) => setError(extractError(err)))
+    setError(null)
+    Promise.allSettled([
+      listarCartera(),
+      listarClientes({ q: busqueda, limit: 300 }),
+    ])
+      .then(([carteraResult, clientesResult]) => {
+        if (carteraResult.status === 'fulfilled') setItems(carteraResult.value || [])
+        if (clientesResult.status === 'fulfilled') setClientes(clientesResult.value || [])
+        if (carteraResult.status === 'rejected' && clientesResult.status === 'rejected') {
+          setError(extractError(clientesResult.reason, 'No se pudieron cargar clientes.'))
+        }
+      })
       .finally(() => setLoading(false))
-  }, [])
+  }, [busqueda])
 
   useEffect(() => { cargar() }, [cargar])
 
@@ -71,9 +84,11 @@ export default function CarteraPage() {
   return (
     <>
       <PageHead
-        title="Cartera del dia"
-        subtitle={`${items.length} clientes asignados - ${pendientes} pendientes de visita`}
-        icon={Briefcase}
+        title="Clientes"
+        subtitle={vista === 'clientes'
+          ? `${clientes.length} clientes/prospectos registrados en el core`
+          : `${items.length} clientes asignados - ${pendientes} pendientes de visita`}
+        icon={vista === 'clientes' ? Users : Briefcase}
         actions={
           <button className="hb-btn hb-btn-gray hb-btn-sm" onClick={cargar}>
             <RefreshCw size={15} /> Actualizar
@@ -84,10 +99,84 @@ export default function CarteraPage() {
       {error && <Alert tipo="error">{error}</Alert>}
       {ok && <Alert tipo="success">{ok}</Alert>}
 
+      <div className="hb-card" style={{ display: 'grid', gridTemplateColumns: 'auto auto minmax(220px, 1fr)', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+        <button
+          className={`hb-btn ${vista === 'clientes' ? '' : 'hb-btn-gray'}`}
+          onClick={() => setVista('clientes')}
+        >
+          <Users size={16} /> Todos los clientes
+        </button>
+        <button
+          className={`hb-btn ${vista === 'cartera' ? '' : 'hb-btn-gray'}`}
+          onClick={() => setVista('cartera')}
+        >
+          <Briefcase size={16} /> Cartera del dia
+        </button>
+        <div className="hb-field" style={{ margin: 0 }}>
+          <label>Buscar cliente</label>
+          <div style={{ position: 'relative' }}>
+            <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: 'var(--hb-muted)' }} />
+            <input
+              className="hb-input"
+              style={{ paddingLeft: 36 }}
+              placeholder="DNI, nombre o negocio"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
       {loading ? (
-        <Loader text="Cargando tu cartera..." />
+        <Loader text="Cargando clientes..." />
+      ) : vista === 'clientes' ? (
+        clientes.length === 0 ? (
+          <div className="hb-card hb-table-empty">No hay clientes registrados para el filtro seleccionado.</div>
+        ) : (
+          <div className="cm-list">
+            {clientes.map((cli) => (
+              <div className="cm-item" key={cli.id}>
+                <span className={`cm-item-prio ${cli.estado_solicitud === 'rechazado' ? 'alta' : 'normal'}`} />
+                <div className="cm-item-main">
+                  <strong>{cli.cliente_nombre}</strong>
+                  <small>
+                    <IdCard size={13} /> DNI {cli.numero_documento}
+                    <span>-</span>
+                    {cli.telefono || 'Sin telefono'}
+                    <span>-</span>
+                    {cli.nombre_negocio || humanizar(cli.tipo_negocio || 'cliente')}
+                  </small>
+                </div>
+                <div className="cm-item-date">
+                  <span>Registro</span>
+                  <strong>{formatDateTime(cli.fecha_registro)}</strong>
+                  <small>{cli.numero_expediente || 'Sin expediente'}</small>
+                </div>
+                <div className="cm-item-right">
+                  <Badge estado={cli.estado_solicitud || (cli.es_prospecto ? 'prospecto' : 'cliente')} label={humanizar(cli.estado_solicitud || (cli.es_prospecto ? 'prospecto' : 'cliente'))} />
+                  <Badge estado={cli.calificacion_sbs || 'NORMAL'} label={`SBS ${cli.calificacion_sbs || 'NORMAL'}`} />
+                  <div className="cm-item-monto">
+                    <Money value={cli.monto_credito} />
+                    <small>referencial</small>
+                  </div>
+                  <button
+                    className="hb-btn hb-btn-ghost hb-btn-sm"
+                    onClick={() => navigate(`/clientes/${cli.id}/ficha`)}
+                  >
+                    <FileText size={15} /> Ficha
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       ) : items.length === 0 ? (
-        <div className="hb-card hb-table-empty">No tienes clientes asignados para hoy.</div>
+        <div className="hb-card hb-table-empty">
+          No tienes clientes asignados para hoy.
+          <div style={{ marginTop: 14 }}>
+            <button className="hb-btn" onClick={() => setVista('clientes')}><Users size={16} /> Ver todos los clientes</button>
+          </div>
+        </div>
       ) : (
         <div className="cm-list">
           {items.map((it) => {

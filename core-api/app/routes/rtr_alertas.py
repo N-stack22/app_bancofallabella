@@ -78,3 +78,13 @@ def marcar_leida(
     )
     db.commit()
     return {"status": "ok"}
+
+
+@router.patch("/{alerta_id}/leida")
+def marcar_leida_patch(
+    alerta_id: str,
+    db: Session = Depends(get_db),
+    asesor: dict = Depends(get_current_asesor),
+):
+    """Alias REST para marcar una alerta como leida."""
+    return marcar_leida(alerta_id, db, asesor)

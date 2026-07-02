@@ -1,8 +1,11 @@
 import api, { cachedGet, invalidateApiCache } from './api.js'
 
 /** Historial / tablero de solicitudes del asesor. GET /solicitudes */
-export async function listarSolicitudes() {
-  return cachedGet('/solicitudes', {}, 45000)
+export async function listarSolicitudes(filters = {}) {
+  const params = Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+  )
+  return cachedGet('/solicitudes', { params }, 45000)
 }
 
 /** Crea una solicitud de crédito. POST /solicitudes */

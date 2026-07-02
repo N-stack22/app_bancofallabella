@@ -107,7 +107,7 @@ const demoEmail = 'nathalie.rodriguez@cliente.falabella.pe';
 const demoPassword = '12345';
 const secureStorage = FlutterSecureStorage();
 const productionCoreBaseUrl =
-    'https://n-stack22-sistemagestionacademica-production.up.railway.app';
+    'https://n-stack22-bancofallabela-production.up.railway.app';
 const configuredCoreBaseUrl = String.fromEnvironment(
   'CORE_BASE_URL',
   defaultValue: '',
@@ -538,15 +538,16 @@ class CoreApiClient {
 
   Future<CreditApplicationResult> submitApplication(
     CreditApplicationData data,
+    String token,
   ) async {
     final body = jsonEncode(data.toJson());
     try {
-      final result = await _postApplication(primaryCoreBaseUrl, body);
+      final result = await _postApplication(primaryCoreBaseUrl, body, token);
       _summaryCache.clear();
       return result;
     } catch (_) {
       if (fallbackCoreBaseUrl == primaryCoreBaseUrl) rethrow;
-      final result = await _postApplication(fallbackCoreBaseUrl, body);
+      final result = await _postApplication(fallbackCoreBaseUrl, body, token);
       _summaryCache.clear();
       return result;
     }
@@ -572,7 +573,10 @@ class CoreApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> loadCustomerSummary(String document) async {
+  Future<Map<String, dynamic>> loadCustomerSummary(
+    String document,
+    String token,
+  ) async {
     final key = document.trim();
     final cached = _summaryCache[key];
     if (cached != null &&
@@ -580,11 +584,11 @@ class CoreApiClient {
       return cached.data;
     }
     try {
-      final data = await _getSummary(primaryCoreBaseUrl, document);
+      final data = await _getSummary(primaryCoreBaseUrl, token);
       _summaryCache[key] = _SummaryCacheEntry(data, DateTime.now());
       return data;
     } catch (_) {
-      final data = await _getSummary(fallbackCoreBaseUrl, document);
+      final data = await _getSummary(fallbackCoreBaseUrl, token);
       _summaryCache[key] = _SummaryCacheEntry(data, DateTime.now());
       return data;
     }
@@ -624,8 +628,13 @@ class CoreApiClient {
   Future<CreditApplicationResult> _postApplication(
     String baseUrl,
     String body,
+    String token,
   ) async {
-    final response = await _postJson('$baseUrl/cliente/solicitudes', body);
+    final response = await _postJson(
+      '$baseUrl/cliente/solicitudes',
+      body,
+      token: token,
+    );
     return CreditApplicationResult.fromJson(response);
   }
 
@@ -634,11 +643,8 @@ class CoreApiClient {
     return _text(response['access_token'] ?? response['token'], '');
   }
 
-  Future<Map<String, dynamic>> _getSummary(
-    String baseUrl,
-    String document,
-  ) async {
-    final response = await _getJson('$baseUrl/cliente/demo/$document/resumen');
+  Future<Map<String, dynamic>> _getSummary(String baseUrl, String token) async {
+    final response = await _getJson('$baseUrl/cliente/resumen', token: token);
     return Map<String, dynamic>.from(response as Map);
   }
 
@@ -666,10 +672,16 @@ class CoreApiClient {
     return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
   }
 
-  Future<dynamic> _getJson(String url) async {
+  Future<dynamic> _getJson(String url, {String? token}) async {
     final uri = _coreUri(url);
+    final headers = <String, String>{};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
     final response = await _retryWhenConnectionRefused(
-      () => http.get(uri).timeout(const Duration(seconds: 25)),
+      () => http
+          .get(uri, headers: headers.isEmpty ? null : headers)
+          .timeout(const Duration(seconds: 25)),
     );
     _ensureOk(response.statusCode, response.body);
     if (response.body.trim().isEmpty) return <String, dynamic>{};
@@ -760,7 +772,7 @@ class _LoginPageState extends State<LoginPage> {
       }
       await secureStorage.write(key: 'cliente_token', value: token);
       await secureStorage.write(key: 'cliente_documento', value: document);
-      final summary = await api.loadCustomerSummary(document);
+      final summary = await api.loadCustomerSummary(document, token);
       if (!mounted) return;
       _openSession(token: token, document: document, summary: summary);
     } catch (error) {
@@ -781,7 +793,10 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
     try {
-      final summary = await const CoreApiClient().loadCustomerSummary(document);
+      final summary = await const CoreApiClient().loadCustomerSummary(
+        document,
+        token,
+      );
       if (!mounted) return;
       _openSession(token: token, document: document, summary: summary);
     } catch (_) {
@@ -1099,6 +1114,7 @@ class _ClientShellState extends State<ClientShell> {
     try {
       final summary = await const CoreApiClient().loadCustomerSummary(
         widget.document,
+        widget.token,
       );
       if (!mounted) return;
       setState(() {
@@ -1115,7 +1131,7 @@ class _ClientShellState extends State<ClientShell> {
     final pages = [
       DashboardPage(profile: profile, products: products),
       SavingsPage(products: products),
-      CreditsPage(profile: profile, products: products),
+      CreditsPage(profile: profile, products: products, token: widget.token),
       PaymentsPage(
         token: widget.token,
         accountNumber: products.savings.number,
@@ -1346,10 +1362,16 @@ class SavingsPage extends StatelessWidget {
 }
 
 class CreditsPage extends StatelessWidget {
-  const CreditsPage({super.key, required this.profile, required this.products});
+  const CreditsPage({
+    super.key,
+    required this.profile,
+    required this.products,
+    required this.token,
+  });
 
   final UserProfile profile;
   final BankProducts products;
+  final String token;
 
   @override
   Widget build(BuildContext context) {
@@ -1437,7 +1459,8 @@ class CreditsPage extends StatelessWidget {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => CreditApplicationPage(profile: profile),
+                  builder: (_) =>
+                      CreditApplicationPage(profile: profile, token: token),
                 ),
               );
             },
@@ -1456,9 +1479,14 @@ class CreditsPage extends StatelessWidget {
 }
 
 class CreditApplicationPage extends StatefulWidget {
-  const CreditApplicationPage({super.key, required this.profile});
+  const CreditApplicationPage({
+    super.key,
+    required this.profile,
+    required this.token,
+  });
 
   final UserProfile profile;
+  final String token;
 
   @override
   State<CreditApplicationPage> createState() => _CreditApplicationPageState();
@@ -1849,6 +1877,7 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
     try {
       final submitted = await const CoreApiClient().submitApplication(
         _buildData(),
+        widget.token,
       );
       if (!mounted) return;
       setState(() => result = submitted);

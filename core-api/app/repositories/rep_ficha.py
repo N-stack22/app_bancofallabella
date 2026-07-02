@@ -3,6 +3,80 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
+def listar_clientes(db: Session, q: str | None = None, limit: int = 200) -> list[dict]:
+    """Lista clientes/prospectos del core, aunque no tengan cartera asignada."""
+    rows = db.execute(
+        text(
+            """
+            SELECT cli.id, cli.numero_documento, cli.nombres, cli.apellidos,
+                   cli.telefono, cli.direccion, cli.tipo_negocio,
+                   cli.nombre_negocio, cli.calificacion_sbs,
+                   COALESCE(cli.es_prospecto, FALSE) AS es_prospecto,
+                   cli.created_at,
+                   s.numero_expediente,
+                   s.estado AS estado_solicitud,
+                   COALESCE(s.monto_solicitado, cr.saldo_total, pre.monto_maximo, 0) AS monto_credito
+            FROM clientes cli
+            LEFT JOIN LATERAL (
+                SELECT numero_expediente, estado, monto_solicitado, created_at
+                FROM solicitudes_credito
+                WHERE cliente_id = cli.id
+                ORDER BY created_at DESC NULLS LAST
+                LIMIT 1
+            ) s ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT saldo_total
+                FROM cr_creditos
+                WHERE cliente_id = cli.id
+                ORDER BY fecha_desembolso DESC NULLS LAST
+                LIMIT 1
+            ) cr ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT monto_maximo
+                FROM creditos_preaprobados
+                WHERE cliente_id = cli.id AND vigente = TRUE
+                ORDER BY score_confianza DESC NULLS LAST
+                LIMIT 1
+            ) pre ON TRUE
+            WHERE (
+                :q IS NULL
+                OR cli.numero_documento ILIKE :like
+                OR cli.nombres ILIKE :like
+                OR cli.apellidos ILIKE :like
+                OR cli.nombre_negocio ILIKE :like
+            )
+            ORDER BY cli.created_at DESC NULLS LAST, cli.apellidos, cli.nombres
+            LIMIT :limit
+            """
+        ),
+        {
+            "q": q,
+            "like": f"%{q}%" if q else None,
+            "limit": max(1, min(limit or 200, 500)),
+        },
+    ).mappings().all()
+    return [
+        {
+            "id": str(r["id"]),
+            "numero_documento": r["numero_documento"],
+            "nombres": r["nombres"],
+            "apellidos": r["apellidos"],
+            "cliente_nombre": f"{r['nombres']} {r['apellidos']}",
+            "telefono": r["telefono"],
+            "direccion": r["direccion"],
+            "tipo_negocio": r["tipo_negocio"],
+            "nombre_negocio": r["nombre_negocio"],
+            "calificacion_sbs": r["calificacion_sbs"] or "NORMAL",
+            "es_prospecto": bool(r["es_prospecto"]),
+            "numero_expediente": r["numero_expediente"],
+            "estado_solicitud": r["estado_solicitud"],
+            "monto_credito": float(r["monto_credito"] or 0),
+            "fecha_registro": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
 def actualizar_ubicacion(
     db: Session,
     cliente_id: str,

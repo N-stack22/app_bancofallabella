@@ -14,7 +14,17 @@ def listar_mora(
     asesor: dict = Depends(get_current_asesor),
 ):
     """Listado de mora diaria (M10 / HU-30)."""
-    return rep_cobranza.listar_mora(db)
+    return rep_cobranza.listar_mora(db, asesor.get("asesor_id"))
+
+
+@router.get("/cliente/{cliente_id}")
+def listar_acciones_cliente(
+    cliente_id: str,
+    db: Session = Depends(get_db),
+    asesor: dict = Depends(get_current_asesor),
+):
+    """Historial de gestiones de cobranza por cliente."""
+    return rep_cobranza.listar_por_cliente(db, cliente_id)
 
 
 @router.post("/accion")

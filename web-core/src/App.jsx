@@ -12,11 +12,11 @@ import EvaluacionPage from './pages/EvaluacionPage.jsx'
 import CobranzaPage from './pages/CobranzaPage.jsx'
 import ReportesPage from './pages/ReportesPage.jsx'
 import CasosPage from './pages/CasosPage.jsx'
+import AdminPage from './pages/AdminPage.jsx'
 
-// Layout de las rutas autenticadas: cabecera + pestañas + contenido.
-function PrivateLayout({ children }) {
+function PrivateLayout({ children, roles = [] }) {
   return (
-    <PrivateRoute>
+    <PrivateRoute roles={roles}>
       <Header />
       <main className="cm-main">
         <div className="cm-container">{children}</div>
@@ -28,10 +28,8 @@ function PrivateLayout({ children }) {
 export default function App() {
   return (
     <Routes>
-      {/* Público */}
       <Route path="/login" element={<LoginPage />} />
 
-      {/* Privado */}
       <Route path="/inicio" element={<PrivateLayout><DashboardPage /></PrivateLayout>} />
       <Route path="/cartera" element={<PrivateLayout><CarteraPage /></PrivateLayout>} />
       <Route path="/clientes/:clienteId/ficha" element={<PrivateLayout><FichaClientePage /></PrivateLayout>} />
@@ -39,8 +37,9 @@ export default function App() {
       <Route path="/solicitudes/nueva" element={<PrivateLayout><NuevaSolicitudPage /></PrivateLayout>} />
       <Route path="/evaluacion" element={<PrivateLayout><EvaluacionPage /></PrivateLayout>} />
       <Route path="/cobranza" element={<PrivateLayout><CobranzaPage /></PrivateLayout>} />
-      <Route path="/reportes" element={<PrivateLayout><ReportesPage /></PrivateLayout>} />
+      <Route path="/reportes" element={<PrivateLayout roles={['supervisor', 'administrador', 'comite', 'analista']}><ReportesPage /></PrivateLayout>} />
       <Route path="/casos" element={<PrivateLayout><CasosPage /></PrivateLayout>} />
+      <Route path="/admin" element={<PrivateLayout roles={['administrador']}><AdminPage /></PrivateLayout>} />
 
       <Route path="/" element={<Navigate to="/inicio" replace />} />
       <Route path="*" element={<Navigate to="/inicio" replace />} />

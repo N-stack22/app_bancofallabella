@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.cfg_database import get_db
+from app.core.cfg_auth import get_current_asesor
 from app.schemas.sch_auth import LoginIn, TokenOut
 from app.controllers import ctl_auth
 
@@ -24,3 +25,15 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
     return result
+
+
+@router.get("/me")
+def me(asesor: dict = Depends(get_current_asesor)):
+    """Perfil autenticado actual, usado por web/backoffice para RBAC."""
+    return {"authenticated": True, "asesor": asesor}
+
+
+@router.post("/logout")
+def logout():
+    """Logout logico para clientes HTTP stateless/JWT."""
+    return {"status": "ok"}

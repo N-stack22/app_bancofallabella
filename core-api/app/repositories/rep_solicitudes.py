@@ -266,8 +266,13 @@ def listar_notas(db: Session, solicitud_id: str) -> list[dict]:
     ]
 
 
-def listar(db: Session, asesor_id: str) -> list[dict]:
-    """Solicitudes del asesor en el mes actual (HU-20), recientes primero."""
+def listar(
+    db: Session,
+    asesor_id: str | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+) -> list[dict]:
+    """Solicitudes historicas, filtradas por asesor y rango cuando corresponde."""
     rows = db.execute(
         text(
             """
@@ -275,12 +280,17 @@ def listar(db: Session, asesor_id: str) -> list[dict]:
                    s.estado, s.created_at, c.nombres, c.apellidos
             FROM solicitudes_credito s
             JOIN clientes c ON c.id = s.cliente_id
-            WHERE s.asesor_id = :asesor
-              AND date_trunc('month', s.created_at) = date_trunc('month', now())
+            WHERE (:asesor IS NULL OR s.asesor_id = CAST(:asesor AS uuid))
+              AND (:fecha_desde IS NULL OR s.created_at::date >= :fecha_desde)
+              AND (:fecha_hasta IS NULL OR s.created_at::date <= :fecha_hasta)
             ORDER BY s.created_at DESC
             """
         ),
-        {"asesor": asesor_id},
+        {
+            "asesor": asesor_id,
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+        },
     ).mappings().all()
     return [_row_resumen(r) for r in rows]
 
@@ -301,10 +311,177 @@ def listar_demo(db: Session) -> list[dict]:
     return listar(db, str(asesor[0]))
 
 
-def decidir_comite(db: Session, solicitud_id: str, data: dict) -> dict | None:
+def obtener_detalle(db: Session, solicitud_id: str) -> dict | None:
+    row = db.execute(
+        text(
+            """
+            SELECT s.*, c.numero_documento, c.tipo_documento, c.nombres,
+                   c.apellidos, c.telefono, c.email, c.direccion,
+                   c.tipo_negocio AS cliente_tipo_negocio,
+                   c.nombre_negocio AS cliente_nombre_negocio,
+                   a.codigo_empleado, a.nombres AS asesor_nombres,
+                   a.apellidos AS asesor_apellidos
+            FROM solicitudes_credito s
+            JOIN clientes c ON c.id = s.cliente_id
+            LEFT JOIN asesores a ON a.id = s.asesor_id
+            WHERE s.id = :id
+            """
+        ),
+        {"id": solicitud_id},
+    ).mappings().first()
+    if not row:
+        return None
+
+    documentos = db.execute(
+        text(
+            """SELECT id, tipo_documento, storage_url, tamanio_kb,
+                      nitidez_score, created_at
+               FROM solicitudes_documentos
+               WHERE solicitud_id = :id
+               ORDER BY created_at DESC"""
+        ),
+        {"id": solicitud_id},
+    ).mappings().all()
+    buro = db.execute(
+        text(
+            """SELECT id, dni_consultado, calificacion_sbs, entidades_con_deuda,
+                      deuda_total_pen, mayor_deuda, dias_mayor_mora,
+                      resultado_json, firma_consentimiento_base64, created_at
+               FROM consultas_buro
+               WHERE solicitud_id = :id
+               ORDER BY created_at DESC
+               LIMIT 1"""
+        ),
+        {"id": solicitud_id},
+    ).mappings().first()
+    notas = listar_notas(db, solicitud_id)
+    return {
+        "id": str(row["id"]),
+        "numero_expediente": row["numero_expediente"],
+        "estado": row["estado"],
+        "canal": row.get("canal"),
+        "cliente": {
+            "id": str(row["cliente_id"]),
+            "numero_documento": row["numero_documento"],
+            "tipo_documento": row["tipo_documento"],
+            "nombres": row["nombres"],
+            "apellidos": row["apellidos"],
+            "telefono": row["telefono"],
+            "email": row["email"],
+            "direccion": row["direccion"],
+            "tipo_negocio": row["cliente_tipo_negocio"],
+            "nombre_negocio": row["cliente_nombre_negocio"],
+        },
+        "asesor": {
+            "id": str(row["asesor_id"]) if row["asesor_id"] else None,
+            "codigo_empleado": row["codigo_empleado"],
+            "nombre": f"{row['asesor_nombres'] or ''} {row['asesor_apellidos'] or ''}".strip(),
+        },
+        "negocio": {
+            "tipo_negocio": row["tipo_negocio"],
+            "nombre_negocio": row["nombre_negocio"],
+            "ingresos_estimados": float(row["ingresos_estimados"] or 0),
+            "monto_solicitado": float(row["monto_solicitado"] or 0),
+            "plazo_meses": row["plazo_meses"],
+            "moneda": row["moneda"],
+            "tipo_cuota": row["tipo_cuota"],
+            "garantia": row["garantia"],
+            "destino_credito": row["destino_credito"],
+            "cuota_estimada": float(row["cuota_estimada"] or 0),
+            "tea_referencial": float(row["tea_referencial"] or 0),
+        },
+        "decision": {
+            "monto_aprobado": float(row["monto_aprobado"] or 0),
+            "motivo_rechazo": row["motivo_rechazo"],
+            "condicion_adicional": row["condicion_adicional"],
+            "analista_asignado": row["analista_asignado"],
+            "firma_cliente_base64": row["firma_cliente_base64"],
+        },
+        "documentos": [_serializar_documento(d) for d in documentos],
+        "buro": _safe_dict(buro) if buro else None,
+        "notas": notas,
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+def enviar_comite(db: Session, solicitud_id: str) -> dict | None:
+    row = db.execute(
+        text("SELECT id, numero_expediente, estado FROM solicitudes_credito WHERE id=:id"),
+        {"id": solicitud_id},
+    ).mappings().first()
+    if not row:
+        return None
+    if row["estado"] not in {"borrador", "enviado"}:
+        raise ValueError("Solo solicitudes en borrador o enviadas pueden pasar a comite")
+    db.execute(
+        text(
+            """UPDATE solicitudes_credito
+               SET estado='recibido_comite', pendiente_sync=TRUE, updated_at=now()
+               WHERE id=:id"""
+        ),
+        {"id": solicitud_id},
+    )
+    _outbox(db, solicitud_id, "enviar_comite", {"numero_expediente": row["numero_expediente"]})
+    db.commit()
+    return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": "recibido_comite"}
+
+
+def actualizar_estado(
+    db: Session,
+    solicitud_id: str,
+    data: dict,
+    analista: str | None = None,
+) -> dict | None:
+    estado = data.get("estado")
+    if estado in {"aprobado", "condicionado", "rechazado"}:
+        return decidir_comite(db, solicitud_id, {"decision": estado, **data}, analista)
+    if estado == "desembolsado":
+        return desembolsar(db, solicitud_id, data)
+    if estado not in {"borrador", "enviado", "recibido_comite", "en_evaluacion"}:
+        raise ValueError("Estado de solicitud invalido")
+    row = db.execute(
+        text("SELECT id, numero_expediente, estado FROM solicitudes_credito WHERE id=:id"),
+        {"id": solicitud_id},
+    ).mappings().first()
+    if not row:
+        return None
+    db.execute(
+        text(
+            """UPDATE solicitudes_credito
+               SET estado=:estado,
+                   analista_asignado=COALESCE(:analista, analista_asignado),
+                   pendiente_sync=TRUE,
+                   updated_at=now()
+               WHERE id=:id"""
+        ),
+        {"id": solicitud_id, "estado": estado, "analista": analista},
+    )
+    _outbox(db, solicitud_id, "cambio_estado", {
+        "numero_expediente": row["numero_expediente"],
+        "estado_anterior": row["estado"],
+        "estado": estado,
+        "analista_asignado": analista,
+    })
+    db.commit()
+    return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": estado}
+
+
+def decidir_comite(
+    db: Session,
+    solicitud_id: str,
+    data: dict,
+    analista: str | None = None,
+) -> dict | None:
     decision = data.get("decision")
     if decision not in {"aprobado", "condicionado", "rechazado"}:
         raise ValueError("Decision de comite invalida")
+    if decision == "rechazado" and not (data.get("motivo_rechazo") or "").strip():
+        raise ValueError("El motivo de rechazo es obligatorio")
+    if decision == "condicionado" and not (data.get("condicion_adicional") or "").strip():
+        raise ValueError("La condicion adicional es obligatoria")
+    if decision == "aprobado" and data.get("monto_aprobado") is None:
+        raise ValueError("El monto aprobado es obligatorio")
 
     row = db.execute(
         text(
@@ -316,6 +493,8 @@ def decidir_comite(db: Session, solicitud_id: str, data: dict) -> dict | None:
     ).mappings().first()
     if not row:
         return None
+    if row["estado"] not in {"recibido_comite", "en_evaluacion", "enviado"}:
+        raise ValueError("La solicitud no esta en un estado evaluable por comite")
 
     monto = data.get("monto_aprobado")
     if decision == "rechazado":
@@ -330,6 +509,7 @@ def decidir_comite(db: Session, solicitud_id: str, data: dict) -> dict | None:
                    monto_aprobado = :monto,
                    condicion_adicional = :condicion,
                    motivo_rechazo = :motivo,
+                   analista_asignado = COALESCE(:analista, analista_asignado),
                    pendiente_sync = TRUE,
                    updated_at = now()
                WHERE id = :id"""
@@ -340,6 +520,7 @@ def decidir_comite(db: Session, solicitud_id: str, data: dict) -> dict | None:
             "monto": monto,
             "condicion": data.get("condicion_adicional"),
             "motivo": data.get("motivo_rechazo"),
+            "analista": analista or data.get("analista_asignado"),
         },
     )
     _outbox(db, solicitud_id, "decision_comite", {
@@ -348,9 +529,54 @@ def decidir_comite(db: Session, solicitud_id: str, data: dict) -> dict | None:
         "monto_aprobado": float(monto or 0),
         "condicion_adicional": data.get("condicion_adicional"),
         "motivo_rechazo": data.get("motivo_rechazo"),
+        "analista_asignado": analista or data.get("analista_asignado"),
     })
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": decision}
+
+
+def agregar_documento(db: Session, solicitud_id: str, data: dict) -> dict:
+    doc_id = str(uuid.uuid4())
+    db.execute(
+        text(
+            """INSERT INTO solicitudes_documentos
+                 (id, solicitud_id, tipo_documento, storage_url, tamanio_kb, nitidez_score)
+               VALUES (:id, :sol, :tipo, :url, :kb, :nitidez)"""
+        ),
+        {
+            "id": doc_id,
+            "sol": solicitud_id,
+            "tipo": data["tipo_documento"],
+            "url": data.get("storage_url"),
+            "kb": data.get("tamanio_kb"),
+            "nitidez": data.get("nitidez_score"),
+        },
+    )
+    db.commit()
+    return {"id": doc_id, "solicitud_id": solicitud_id, **data}
+
+
+def listar_documentos(db: Session, solicitud_id: str) -> list[dict]:
+    rows = db.execute(
+        text(
+            """SELECT id, solicitud_id, tipo_documento, storage_url,
+                      tamanio_kb, nitidez_score, created_at
+               FROM solicitudes_documentos
+               WHERE solicitud_id = :id
+               ORDER BY created_at DESC"""
+        ),
+        {"id": solicitud_id},
+    ).mappings().all()
+    return [_serializar_documento(row) for row in rows]
+
+
+def eliminar_documento(db: Session, documento_id: str) -> bool:
+    result = db.execute(
+        text("DELETE FROM solicitudes_documentos WHERE id = :id"),
+        {"id": documento_id},
+    )
+    db.commit()
+    return bool(result.rowcount)
 
 
 def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dict | None:
@@ -411,6 +637,34 @@ def _row_resumen(r) -> dict:
         "estado": r["estado"],
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
     }
+
+
+def _serializar_documento(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "solicitud_id": str(r["solicitud_id"]) if "solicitud_id" in r else None,
+        "tipo_documento": r["tipo_documento"],
+        "storage_url": r["storage_url"],
+        "tamanio_kb": r["tamanio_kb"],
+        "nitidez_score": float(r["nitidez_score"] or 0),
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    }
+
+
+def _safe_dict(row) -> dict:
+    return {key: _safe_value(value) for key, value in dict(row).items()}
+
+
+def _safe_value(value):
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
 
 
 def _prioridad(monto: float) -> str:

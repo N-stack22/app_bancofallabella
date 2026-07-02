@@ -28,7 +28,7 @@ Cuando el backend tenga URL publica HTTPS, compila la web con:
 
 ```bash
 cd web-core
-$env:VITE_API_URL="https://TU_CORE_API_PUBLICA"
+$env:VITE_API_URL="https://n-stack22-bancofallabela-production.up.railway.app"
 npm run build
 cd ..
 firebase deploy --only hosting
@@ -45,14 +45,14 @@ https://falanellaweb.web.app/inicio
 App clientes y fuerza de ventas deben apuntar al backend publico:
 
 ```bash
-flutter run --dart-define=CORE_BASE_URL=https://TU_CORE_API_PUBLICA
+flutter run --dart-define=CORE_BASE_URL=https://n-stack22-bancofallabela-production.up.railway.app
 ```
 
 La app fuerza de ventas tambien usa Supabase Cloud directo. Compilala con la anon public key, no con service_role:
 
 ```bash
 flutter run \
-  --dart-define=CORE_BASE_URL=https://TU_CORE_API_PUBLICA \
+  --dart-define=CORE_BASE_URL=https://n-stack22-bancofallabela-production.up.railway.app \
   --dart-define=SUPABASE_URL=https://oqkuvygkchsftzclakyu.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=TU_ANON_PUBLIC_KEY \
   --dart-define=SUPABASE_BUCKET_DOCUMENTOS=documentos-credito

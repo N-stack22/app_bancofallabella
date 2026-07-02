@@ -113,7 +113,7 @@ export default function DashboardPage() {
               <div>
                 <div className="cm-kpi-label">Solicitudes aprobadas</div>
                 <span className="cm-kpi-val">{aprobadas}</span>
-                <small>de {solicitudes.length} este mes</small>
+                <small>de {solicitudes.length} historicas</small>
               </div>
             </div>
           </div>

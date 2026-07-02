@@ -12,14 +12,18 @@ export default function ReportesPage() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
 
   const cargar = useCallback(() => {
     setLoading(true)
-    productividad()
+    setError(null)
+    productividad({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta })
       .then((data) => setRows(data || []))
       .catch((err) => setError(extractError(err)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [fechaDesde, fechaHasta])
+
   useEffect(() => { cargar() }, [cargar])
 
   const totEnviadas = rows.reduce((a, r) => a + (r.enviadas || 0), 0)
@@ -31,15 +35,35 @@ export default function ReportesPage() {
     <>
       <PageHead
         title="Productividad del equipo"
-        subtitle="Solicitudes y colocación del mes en curso"
+        subtitle="Solicitudes y colocacion historica con filtros por fecha"
         icon={BarChart3}
         actions={<button className="hb-btn hb-btn-gray hb-btn-sm" onClick={cargar}><RefreshCw size={15} /> Actualizar</button>}
       />
 
       {error && <Alert tipo="error">{error}</Alert>}
 
+      <div className="hb-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+        <div className="hb-field" style={{ margin: 0 }}>
+          <label>Desde</label>
+          <input className="hb-input" type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} />
+        </div>
+        <div className="hb-field" style={{ margin: 0 }}>
+          <label>Hasta</label>
+          <input className="hb-input" type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} />
+        </div>
+        <button
+          className="hb-btn hb-btn-gray"
+          onClick={() => {
+            setFechaDesde('')
+            setFechaHasta('')
+          }}
+        >
+          Ver historico completo
+        </button>
+      </div>
+
       {loading ? (
-        <Loader text="Cargando reportes…" />
+        <Loader text="Cargando reportes..." />
       ) : (
         <>
           <div className="cm-kpis">
@@ -52,7 +76,7 @@ export default function ReportesPage() {
               <div>
                 <div className="cm-kpi-label">Aprobadas</div>
                 <span className="cm-kpi-val">{totAprobadas}</span>
-                <small>{formatPct(totEnviadas ? (totAprobadas / totEnviadas) * 100 : 0)} de aprobación</small>
+                <small>{formatPct(totEnviadas ? (totAprobadas / totEnviadas) * 100 : 0)} de aprobacion</small>
               </div>
             </div>
             <div className="cm-kpi" style={{ borderLeftColor: '#f7941e' }}>
@@ -66,7 +90,7 @@ export default function ReportesPage() {
           </div>
 
           {rows.length === 0 ? (
-            <div className="hb-card hb-table-empty">Sin actividad registrada este mes.</div>
+            <div className="hb-card hb-table-empty">Sin actividad registrada para el rango seleccionado.</div>
           ) : (
             <>
               <Card title="Solicitudes enviadas por asesor" icon={BarChart3}>

@@ -7,18 +7,24 @@ import Alert from '../components/ui/Alert.jsx'
 import Badge from '../components/ui/Badge.jsx'
 import Money from '../components/ui/Money.jsx'
 import Modal from '../components/ui/Modal.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import {
   agregarNota, decidirComite, desembolsarSolicitud, listarNotas, listarSolicitudes,
 } from '../services/solicitudesService.js'
 import { extractError, formatDate, formatDateTime } from '../utils/format.js'
+import { hasRole } from '../utils/roles.js'
 
 export default function SolicitudesPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const canDecide = hasRole(user, ['comite', 'analista', 'supervisor', 'administrador'])
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [ok, setOk] = useState(null)
   const [savingAction, setSavingAction] = useState(null)
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
 
   const [notasDe, setNotasDe] = useState(null)
   const [notas, setNotas] = useState([])
@@ -29,11 +35,11 @@ export default function SolicitudesPage() {
   const cargar = useCallback(() => {
     setLoading(true)
     setOk(null)
-    listarSolicitudes()
+    listarSolicitudes({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta })
       .then((data) => setItems(data || []))
       .catch((err) => setError(extractError(err)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [fechaDesde, fechaHasta])
 
   useEffect(() => { cargar() }, [cargar])
 
@@ -81,7 +87,7 @@ export default function SolicitudesPage() {
         motivo_rechazo: decision === 'rechazado' ? 'No cumple politica de riesgo.' : null,
       })
       setOk(`${sol.numero_expediente} actualizado a ${decision}.`)
-      await listarSolicitudes().then((data) => setItems(data || []))
+      await listarSolicitudes({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta }).then((data) => setItems(data || []))
     } catch (err) {
       setError(extractError(err))
     } finally {
@@ -95,7 +101,7 @@ export default function SolicitudesPage() {
     try {
       await desembolsarSolicitud(sol.id, { observacion: 'Desembolso confirmado desde portal.' })
       setOk(`${sol.numero_expediente} desembolsado y enviado a sync_outbox.`)
-      await listarSolicitudes().then((data) => setItems(data || []))
+      await listarSolicitudes({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta }).then((data) => setItems(data || []))
     } catch (err) {
       setError(extractError(err))
     } finally {
@@ -120,11 +126,31 @@ export default function SolicitudesPage() {
       {error && <Alert tipo="error">{error}</Alert>}
       {ok && <Alert tipo="success">{ok}</Alert>}
 
+      <div className="hb-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+        <div className="hb-field" style={{ margin: 0 }}>
+          <label>Desde</label>
+          <input className="hb-input" type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} />
+        </div>
+        <div className="hb-field" style={{ margin: 0 }}>
+          <label>Hasta</label>
+          <input className="hb-input" type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} />
+        </div>
+        <button
+          className="hb-btn hb-btn-gray"
+          onClick={() => {
+            setFechaDesde('')
+            setFechaHasta('')
+          }}
+        >
+          Ver historico completo
+        </button>
+      </div>
+
       {loading ? (
         <Loader text="Cargando solicitudes..." />
       ) : items.length === 0 ? (
         <div className="hb-card hb-table-empty">
-          Aun no has registrado solicitudes este mes.
+          No hay solicitudes para el rango seleccionado.
           <div style={{ marginTop: 14 }}>
             <button className="hb-btn" onClick={() => navigate('/solicitudes/nueva')}><PlusCircle size={16} /> Registrar la primera</button>
           </div>
@@ -155,7 +181,7 @@ export default function SolicitudesPage() {
                     <td>{formatDate(s.created_at)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                        {s.estado === 'recibido_comite' && (
+                        {canDecide && s.estado === 'recibido_comite' && (
                           <>
                             <button className="hb-btn hb-btn-sm" onClick={() => accionComite(s, 'aprobado')} disabled={!!savingAction}>
                               <CheckCircle2 size={14} /> Aprobar
@@ -168,7 +194,7 @@ export default function SolicitudesPage() {
                             </button>
                           </>
                         )}
-                        {['aprobado', 'condicionado'].includes(s.estado) && (
+                        {canDecide && ['aprobado', 'condicionado'].includes(s.estado) && (
                           <button className="hb-btn hb-btn-sm" onClick={() => accionDesembolso(s)} disabled={!!savingAction}>
                             <HandCoins size={14} /> Desembolsar
                           </button>

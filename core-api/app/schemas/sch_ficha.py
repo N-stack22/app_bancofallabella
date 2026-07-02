@@ -22,6 +22,24 @@ class ClienteFicha(BaseModel):
     calificacion_sbs: str = "NORMAL"
 
 
+class ClienteResumenOut(BaseModel):
+    id: str
+    numero_documento: str
+    nombres: str
+    apellidos: str
+    cliente_nombre: str
+    telefono: Optional[str] = None
+    direccion: Optional[str] = None
+    tipo_negocio: Optional[str] = None
+    nombre_negocio: Optional[str] = None
+    calificacion_sbs: str = "NORMAL"
+    es_prospecto: bool = False
+    numero_expediente: Optional[str] = None
+    estado_solicitud: Optional[str] = None
+    monto_credito: float = 0
+    fecha_registro: Optional[str] = None
+
+
 class PosicionCliente(BaseModel):
     deuda_total: float
     cuentas_vigentes: int

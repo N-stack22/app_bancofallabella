@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes import (
     rtr_auth, rtr_cartera, rtr_ficha, rtr_cobranza, rtr_preeval, rtr_buro,
     rtr_solicitudes, rtr_reportes, rtr_alertas, rtr_campanas, rtr_sync,
-    rtr_cliente, rtr_casos,
+    rtr_cliente, rtr_casos, rtr_documentos, rtr_admin, rtr_listas,
 )
 
 app = FastAPI(
@@ -26,13 +26,17 @@ app.include_router(rtr_cartera.router, prefix="/cartera",  tags=["Cartera"])
 app.include_router(rtr_ficha.router,   prefix="/clientes", tags=["Ficha"])
 app.include_router(rtr_cobranza.router, prefix="/cobranza", tags=["Cobranza"])
 app.include_router(rtr_preeval.router, prefix="/pre-evaluar", tags=["PreEvaluacion"])
+app.include_router(rtr_preeval.router, prefix="/preevaluacion", tags=["PreEvaluacion"])
 app.include_router(rtr_buro.router,    prefix="/buro",      tags=["Buro"])
+app.include_router(rtr_listas.router,  prefix="/listas",    tags=["Listas"])
 app.include_router(rtr_solicitudes.router, prefix="/solicitudes", tags=["Solicitudes"])
+app.include_router(rtr_documentos.router, prefix="/documentos", tags=["Documentos"])
 app.include_router(rtr_reportes.router, prefix="/reportes", tags=["Reportes"])
 app.include_router(rtr_alertas.router, prefix="/alertas", tags=["Alertas"])
 app.include_router(rtr_campanas.router, prefix="/campanas", tags=["Campanas"])
 app.include_router(rtr_sync.router, prefix="/sync", tags=["Sync (Puente al Core)"])
 app.include_router(rtr_casos.router, prefix="/casos", tags=["Casos PDF"])
+app.include_router(rtr_admin.router, prefix="/admin", tags=["Administracion"])
 
 # App de clientes (appbanco / Flutter clientes) — login DNI + productos
 app.include_router(rtr_cliente.router, prefix="/cliente", tags=["Cliente (App)"])

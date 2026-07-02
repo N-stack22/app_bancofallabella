@@ -44,6 +44,22 @@ class DecisionComiteIn(BaseModel):
     monto_aprobado: Optional[float] = None
     condicion_adicional: Optional[str] = None
     motivo_rechazo: Optional[str] = None
+    analista_asignado: Optional[str] = None
+
+
+class EstadoSolicitudIn(BaseModel):
+    estado: str
+    monto_aprobado: Optional[float] = None
+    condicion_adicional: Optional[str] = None
+    motivo_rechazo: Optional[str] = None
+    analista_asignado: Optional[str] = None
+
+
+class DocumentoSolicitudIn(BaseModel):
+    tipo_documento: str
+    storage_url: Optional[str] = None
+    tamanio_kb: Optional[int] = None
+    nitidez_score: Optional[float] = None
 
 
 class DesembolsoIn(BaseModel):
