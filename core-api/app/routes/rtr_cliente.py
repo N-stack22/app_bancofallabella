@@ -29,27 +29,14 @@ def login(data: LoginClienteIn, db: Session = Depends(get_db)):
     except Exception:
         if data.password != "1234":
             raise HTTPException(status_code=401, detail="Credenciales invalidas")
-        cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
-        if cliente is None:
-            raise HTTPException(status_code=401, detail="Cliente demo no registrado")
-        token = create_access_token({
-            "sub": data.numero_documento,
-            "cliente_id": cliente["id"],
-            "nombre": f"{cliente['nombres']} {cliente['apellidos']}",
-        })
-        return {"access_token": token, "token_type": "bearer", "cliente": cliente}
+        db.rollback()
+        return _login_cliente_demo(data, db)
     if result and result.get("_bloqueado"):
         raise HTTPException(status_code=423, detail="Usuario bloqueado por intentos fallidos")
     if not result:
         if data.password == "1234":
-            cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
-            if cliente is not None:
-                token = create_access_token({
-                    "sub": data.numero_documento,
-                    "cliente_id": cliente["id"],
-                    "nombre": f"{cliente['nombres']} {cliente['apellidos']}",
-                })
-                return {"access_token": token, "token_type": "bearer", "cliente": cliente}
+            db.rollback()
+            return _login_cliente_demo(data, db)
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
     return result
 
@@ -182,6 +169,9 @@ def resumen_cliente(db: Session = Depends(get_db), cli: dict = Depends(get_curre
     """Resumen homebanking protegido por token del cliente."""
     cliente = rep_cliente.get_cliente(db, cli["cliente_id"])
     if not cliente:
+        data = rep_cliente.resumen_demo_fallback(cli.get("sub", ""))
+        if data:
+            return data
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     try:
         data = rep_cliente.resumen_demo_por_documento(db, cliente.numero_documento)
@@ -190,6 +180,25 @@ def resumen_cliente(db: Session = Depends(get_db), cli: dict = Depends(get_curre
     if not data:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return data
+
+
+def _login_cliente_demo(data: LoginClienteIn, db: Session):
+    cliente = rep_cliente.cliente_demo_dict(data.numero_documento)
+    if cliente is None:
+        raise HTTPException(status_code=401, detail="Cliente demo no registrado")
+    try:
+        rep_cliente.asegurar_cliente_demo_login(db, data.numero_documento)
+        result = ctl_auth_cliente.login(db, data.numero_documento, data.password)
+        if result:
+            return result
+    except Exception:
+        db.rollback()
+    token = create_access_token({
+        "sub": data.numero_documento,
+        "cliente_id": cliente["id"],
+        "nombre": f"{cliente['nombres']} {cliente['apellidos']}",
+    })
+    return {"access_token": token, "token_type": "bearer", "cliente": cliente}
 
 
 @router.get("/demo/{numero_documento}/resumen")
