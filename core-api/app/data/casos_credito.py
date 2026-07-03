@@ -93,7 +93,6 @@ def casos_completos() -> list[dict]:
         ultimo = int(str(documento)[-1])
         sbs, entidades, deuda, mayor, mora, bloqueado = BURO[ultimo]
         tea_decimal = float(tea)
-        tea_porcentaje = round(tea_decimal * 100, 2)
         if caso == 29:
             pre_eval, pre_score = "REVISAR", 60
         else:
@@ -114,7 +113,7 @@ def casos_completos() -> list[dict]:
             "monto_solicitado": monto,
             "plazo_meses": plazo,
             "tea_decimal": tea_decimal,
-            "tea_referencial": tea_porcentaje,
+            "tea_referencial": tea_decimal,
             "garantia": garantia,
             "destino_credito": destino,
             "cuota_estimada": cuota,

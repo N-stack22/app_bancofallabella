@@ -3,6 +3,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.services import svc_tea
 
 
 def _upsert_cliente(db: Session, d: dict) -> str:
@@ -36,6 +37,7 @@ def _upsert_cliente(db: Session, d: dict) -> str:
 def crear(db: Session, asesor_id: str, agencia_id: str | None, d: dict) -> dict:
     """Crea una solicitud de credito (M5 / HU-17)."""
     cliente_id = _upsert_cliente(db, d)
+    evaluacion = svc_tea.calcular_tea_referencial_db(db, cliente_id, d)
     sol_id = str(uuid.uuid4())
     expediente = "EXP-" + sol_id.replace("-", "")[:8].upper()
     db.execute(
@@ -43,12 +45,15 @@ def crear(db: Session, asesor_id: str, agencia_id: str | None, d: dict) -> dict:
             """INSERT INTO solicitudes_credito
                  (id, numero_expediente, asesor_id, cliente_id, agencia_id,
                   canal, tipo_negocio, nombre_negocio, ingresos_estimados,
-                  monto_solicitado, plazo_meses, moneda, tipo_cuota, garantia,
+                  gastos_mensuales, monto_solicitado, monto_aprobado,
+                  plazo_meses, moneda, tipo_cuota, garantia,
                   destino_credito, cuota_estimada, tea_referencial,
+                  motivo_rechazo, condicion_adicional,
                   firma_cliente_base64, estado)
                VALUES
                  (:id,:exp,:asesor,:cli,:ag,'asesor',:tn,:nn,:ing,
-                  :monto,:plazo,:mon,:tc,:gar,:dest,:cuota,:tea,:firma,'enviado')"""
+                  :gastos,:monto,:monto_aprobado,:plazo,:mon,:tc,:gar,
+                  :dest,:cuota,:tea,:motivo,:condicion,:firma,:estado)"""
         ),
         {
             "id": sol_id,
@@ -59,15 +64,20 @@ def crear(db: Session, asesor_id: str, agencia_id: str | None, d: dict) -> dict:
             "tn": d.get("tipo_negocio"),
             "nn": d.get("nombre_negocio"),
             "ing": d.get("ingresos_estimados"),
+            "gastos": d.get("gastos_mensuales"),
             "monto": d["monto_solicitado"],
+            "monto_aprobado": evaluacion["monto_aprobado_sugerido"],
             "plazo": d["plazo_meses"],
             "mon": d.get("moneda", "PEN"),
             "tc": d.get("tipo_cuota", "mensual"),
             "gar": d.get("garantia", "sin_garantia"),
             "dest": d.get("destino_credito"),
-            "cuota": d.get("cuota_estimada"),
-            "tea": d.get("tea_referencial"),
+            "cuota": evaluacion["cuota_estimada"],
+            "tea": evaluacion["tea_referencial"],
+            "motivo": evaluacion.get("motivo_rechazo"),
+            "condicion": evaluacion.get("condicion_adicional"),
             "firma": d.get("firma_cliente_base64"),
+            "estado": evaluacion["estado_inicial"],
         },
     )
 
@@ -79,6 +89,9 @@ def crear(db: Session, asesor_id: str, agencia_id: str | None, d: dict) -> dict:
         "monto_solicitado": float(d["monto_solicitado"]),
         "plazo_meses": int(d["plazo_meses"]),
         "numero_expediente": expediente,
+        "tea_referencial": evaluacion["tea_referencial"],
+        "cuota_estimada": evaluacion["cuota_estimada"],
+        "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
     }
     db.execute(
         text(
@@ -91,8 +104,24 @@ def crear(db: Session, asesor_id: str, agencia_id: str | None, d: dict) -> dict:
             "payload": json.dumps(payload),
         },
     )
+    svc_tea.registrar_auditoria(
+        db,
+        sol_id,
+        None,
+        evaluacion["estado_inicial"],
+        "creacion_solicitud",
+        evaluacion,
+    )
     db.commit()
-    return {"id": sol_id, "numero_expediente": expediente, "estado": "enviado"}
+    return {
+        "id": sol_id,
+        "numero_expediente": expediente,
+        "estado": evaluacion["estado_inicial"],
+        "tea_referencial": evaluacion["tea_referencial"],
+        "cuota_estimada": evaluacion["cuota_estimada"],
+        "monto_aprobado_sugerido": evaluacion["monto_aprobado_sugerido"],
+        "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
+    }
 
 
 def crear_desde_cliente(db: Session, d: dict) -> dict:
@@ -114,6 +143,7 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
         raise ValueError("No existe un asesor activo para asignar la solicitud")
 
     cliente_id = _upsert_cliente(db, d)
+    evaluacion = svc_tea.calcular_tea_referencial_db(db, cliente_id, d)
     sol_id = str(uuid.uuid4())
     expediente = "EXP-" + sol_id.replace("-", "")[:8].upper()
     prioridad = _prioridad(d.get("monto_solicitado") or 0)
@@ -123,12 +153,15 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
             """INSERT INTO solicitudes_credito
                  (id, numero_expediente, asesor_id, cliente_id, agencia_id,
                   canal, tipo_negocio, nombre_negocio, ingresos_estimados,
-                  monto_solicitado, plazo_meses, moneda, tipo_cuota, garantia,
+                  gastos_mensuales, monto_solicitado, monto_aprobado,
+                  plazo_meses, moneda, tipo_cuota, garantia,
                   destino_credito, cuota_estimada, tea_referencial,
+                  motivo_rechazo, condicion_adicional,
                   firma_cliente_base64, estado)
                VALUES
                  (:id,:exp,:asesor,:cli,:ag,'cliente',:tn,:nn,:ing,
-                  :monto,:plazo,:mon,:tc,:gar,:dest,:cuota,:tea,:firma,'enviado')"""
+                  :gastos,:monto,:monto_aprobado,:plazo,:mon,:tc,:gar,
+                  :dest,:cuota,:tea,:motivo,:condicion,:firma,:estado)"""
         ),
         {
             "id": sol_id,
@@ -139,50 +172,56 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
             "tn": d.get("tipo_negocio"),
             "nn": d.get("nombre_negocio"),
             "ing": d.get("ingresos_estimados"),
+            "gastos": d.get("gastos_mensuales"),
             "monto": d["monto_solicitado"],
+            "monto_aprobado": evaluacion["monto_aprobado_sugerido"],
             "plazo": d["plazo_meses"],
             "mon": d.get("moneda", "PEN"),
             "tc": d.get("tipo_cuota", "mensual"),
             "gar": d.get("garantia", "sin_garantia"),
             "dest": d.get("destino_credito"),
-            "cuota": d.get("cuota_estimada"),
-            "tea": d.get("tea_referencial"),
+            "cuota": evaluacion["cuota_estimada"],
+            "tea": evaluacion["tea_referencial"],
+            "motivo": evaluacion.get("motivo_rechazo"),
+            "condicion": evaluacion.get("condicion_adicional"),
             "firma": d.get("firma_cliente_base64"),
+            "estado": evaluacion["estado_inicial"],
         },
     )
-    db.execute(
-        text(
-            """INSERT INTO cartera_diaria
-                 (id, asesor_id, cliente_id, agencia_id, fecha_asignacion,
-                  tipo_gestion, prioridad, score_prioridad, monto_credito,
-                  estado_visita)
-               VALUES
-                 (:id,:asesor,:cli,:ag,:fecha,'NUEVA_SOLICITUD',:prioridad,
-                  :score,:monto,'pendiente')
-               ON CONFLICT (asesor_id, cliente_id, fecha_asignacion)
-               DO UPDATE SET
-                  tipo_gestion = 'NUEVA_SOLICITUD',
-                  prioridad = EXCLUDED.prioridad,
-                  score_prioridad = EXCLUDED.score_prioridad,
-                  monto_credito = EXCLUDED.monto_credito,
-                  estado_visita = 'pendiente',
-                  resultado_visita = NULL,
-                  observacion_visita = NULL,
-                  timestamp_visita = NULL,
-                  lat_visita = NULL,
-                  lng_visita = NULL"""
-        ),
-        {
-            "id": str(uuid.uuid4()),
-            "asesor": asesor["id"],
-            "cli": cliente_id,
-            "ag": asesor["agencia_id"],
-            "fecha": date.today(),
-            "prioridad": prioridad,
-            "score": score_prioridad,
-            "monto": d["monto_solicitado"],
-        },
-    )
+    if evaluacion["decision"] != "rechazado":
+        db.execute(
+            text(
+                """INSERT INTO cartera_diaria
+                     (id, asesor_id, cliente_id, agencia_id, fecha_asignacion,
+                      tipo_gestion, prioridad, score_prioridad, monto_credito,
+                      estado_visita)
+                   VALUES
+                     (:id,:asesor,:cli,:ag,:fecha,'NUEVA_SOLICITUD',:prioridad,
+                      :score,:monto,'pendiente')
+                   ON CONFLICT (asesor_id, cliente_id, fecha_asignacion)
+                   DO UPDATE SET
+                      tipo_gestion = 'NUEVA_SOLICITUD',
+                      prioridad = EXCLUDED.prioridad,
+                      score_prioridad = EXCLUDED.score_prioridad,
+                      monto_credito = EXCLUDED.monto_credito,
+                      estado_visita = 'pendiente',
+                      resultado_visita = NULL,
+                      observacion_visita = NULL,
+                      timestamp_visita = NULL,
+                      lat_visita = NULL,
+                      lng_visita = NULL"""
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "asesor": asesor["id"],
+                "cli": cliente_id,
+                "ag": asesor["agencia_id"],
+                "fecha": date.today(),
+                "prioridad": prioridad,
+                "score": score_prioridad,
+                "monto": evaluacion["monto_aprobado_sugerido"] or d["monto_solicitado"],
+            },
+        )
     db.execute(
         text(
             """INSERT INTO sync_outbox (id, entidad, entidad_id, operacion, payload, estado)
@@ -200,12 +239,31 @@ def crear_desde_cliente(db: Session, d: dict) -> dict:
                     "plazo_meses": int(d["plazo_meses"]),
                     "numero_expediente": expediente,
                     "canal": "cliente",
+                    "tea_referencial": evaluacion["tea_referencial"],
+                    "cuota_estimada": evaluacion["cuota_estimada"],
+                    "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
                 }
             ),
         },
     )
+    svc_tea.registrar_auditoria(
+        db,
+        sol_id,
+        None,
+        evaluacion["estado_inicial"],
+        "creacion_solicitud_cliente",
+        evaluacion,
+    )
     db.commit()
-    return {"id": sol_id, "numero_expediente": expediente, "estado": "enviado"}
+    return {
+        "id": sol_id,
+        "numero_expediente": expediente,
+        "estado": evaluacion["estado_inicial"],
+        "tea_referencial": evaluacion["tea_referencial"],
+        "cuota_estimada": evaluacion["cuota_estimada"],
+        "monto_aprobado_sugerido": evaluacion["monto_aprobado_sugerido"],
+        "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
+    }
 
 
 def listar_por_documento(db: Session, numero_documento: str) -> list[dict]:
@@ -213,9 +271,20 @@ def listar_por_documento(db: Session, numero_documento: str) -> list[dict]:
         text(
             """
             SELECT s.id, s.numero_expediente, s.monto_solicitado, s.monto_aprobado,
-                   s.estado, s.created_at, c.nombres, c.apellidos
+                   s.cuota_estimada, s.tea_referencial, s.estado, s.created_at,
+                   c.nombres, c.apellidos, c.calificacion_sbs,
+                   COALESCE(pre.score_confianza, 0) AS score_confianza
             FROM solicitudes_credito s
             JOIN clientes c ON c.id = s.cliente_id
+            LEFT JOIN LATERAL (
+                SELECT score_confianza
+                FROM creditos_preaprobados
+                WHERE cliente_id = c.id
+                ORDER BY vigente DESC NULLS LAST,
+                         fecha_calculo DESC NULLS LAST,
+                         fecha_vencimiento DESC NULLS LAST
+                LIMIT 1
+            ) pre ON TRUE
             WHERE c.numero_documento = :doc
             ORDER BY s.created_at DESC
             LIMIT 20
@@ -272,9 +341,20 @@ def listar(
         text(
             """
             SELECT s.id, s.numero_expediente, s.monto_solicitado, s.monto_aprobado,
-                   s.estado, s.created_at, c.nombres, c.apellidos
+                   s.cuota_estimada, s.tea_referencial, s.estado, s.created_at,
+                   c.nombres, c.apellidos, c.calificacion_sbs,
+                   COALESCE(pre.score_confianza, 0) AS score_confianza
             FROM solicitudes_credito s
             JOIN clientes c ON c.id = s.cliente_id
+            LEFT JOIN LATERAL (
+                SELECT score_confianza
+                FROM creditos_preaprobados
+                WHERE cliente_id = c.id
+                ORDER BY vigente DESC NULLS LAST,
+                         fecha_calculo DESC NULLS LAST,
+                         fecha_vencimiento DESC NULLS LAST
+                LIMIT 1
+            ) pre ON TRUE
             WHERE (:asesor IS NULL OR s.asesor_id = CAST(:asesor AS uuid))
               AND (:fecha_desde IS NULL OR s.created_at::date >= :fecha_desde)
               AND (:fecha_hasta IS NULL OR s.created_at::date <= :fecha_hasta)
@@ -350,6 +430,18 @@ def obtener_detalle(db: Session, solicitud_id: str) -> dict | None:
         {"id": solicitud_id},
     ).mappings().first()
     notas = listar_notas(db, solicitud_id)
+    contexto_eval = svc_tea.cargar_contexto_evaluacion(
+        db,
+        str(row["cliente_id"]),
+        dict(row),
+    )
+    evaluacion = svc_tea.calcular_tea_referencial(
+        contexto_eval["cliente"],
+        dict(row),
+        _safe_dict(buro) if buro else contexto_eval["consulta_buro"],
+        contexto_eval["preaprobado"],
+        contexto_eval["tarifario"],
+    )
     return {
         "id": str(row["id"]),
         "numero_expediente": row["numero_expediente"],
@@ -376,6 +468,7 @@ def obtener_detalle(db: Session, solicitud_id: str) -> dict | None:
             "tipo_negocio": row["tipo_negocio"],
             "nombre_negocio": row["nombre_negocio"],
             "ingresos_estimados": float(row["ingresos_estimados"] or 0),
+            "gastos_mensuales": float(row["gastos_mensuales"] or 0),
             "monto_solicitado": float(row["monto_solicitado"] or 0),
             "plazo_meses": row["plazo_meses"],
             "moneda": row["moneda"],
@@ -383,8 +476,9 @@ def obtener_detalle(db: Session, solicitud_id: str) -> dict | None:
             "garantia": row["garantia"],
             "destino_credito": row["destino_credito"],
             "cuota_estimada": float(row["cuota_estimada"] or 0),
-            "tea_referencial": float(row["tea_referencial"] or 0),
+            "tea_referencial": svc_tea.normalizar_tea_decimal(row["tea_referencial"], 0),
         },
+        "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
         "decision": {
             "monto_aprobado": float(row["monto_aprobado"] or 0),
             "motivo_rechazo": row["motivo_rechazo"],
@@ -418,6 +512,13 @@ def enviar_comite(db: Session, solicitud_id: str) -> dict | None:
         {"id": solicitud_id},
     )
     _outbox(db, solicitud_id, "enviar_comite", {"numero_expediente": row["numero_expediente"]})
+    svc_tea.registrar_auditoria(
+        db,
+        solicitud_id,
+        row["estado"],
+        "recibido_comite",
+        "enviar_comite",
+    )
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": "recibido_comite"}
 
@@ -458,6 +559,15 @@ def actualizar_estado(
         "estado": estado,
         "analista_asignado": analista,
     })
+    svc_tea.registrar_auditoria(
+        db,
+        solicitud_id,
+        row["estado"],
+        estado,
+        "cambio_estado",
+        {"monto_aprobado_sugerido": None},
+        analista,
+    )
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": estado}
 
@@ -471,16 +581,13 @@ def decidir_comite(
     decision = data.get("decision")
     if decision not in {"aprobado", "condicionado", "rechazado"}:
         raise ValueError("Decision de comite invalida")
-    if decision == "rechazado" and not (data.get("motivo_rechazo") or "").strip():
-        raise ValueError("El motivo de rechazo es obligatorio")
-    if decision == "condicionado" and not (data.get("condicion_adicional") or "").strip():
-        raise ValueError("La condicion adicional es obligatoria")
     if decision == "aprobado" and data.get("monto_aprobado") is None:
         raise ValueError("El monto aprobado es obligatorio")
 
     row = db.execute(
         text(
-            """SELECT id, numero_expediente, monto_solicitado, estado
+            """SELECT id, numero_expediente, cliente_id, monto_solicitado,
+                      plazo_meses, ingresos_estimados, gastos_mensuales, estado
                FROM solicitudes_credito
                WHERE id = :id"""
         ),
@@ -491,17 +598,45 @@ def decidir_comite(
     if row["estado"] not in {"recibido_comite", "en_evaluacion", "enviado"}:
         raise ValueError("La solicitud no esta en un estado evaluable por comite")
 
+    contexto_eval = svc_tea.cargar_contexto_evaluacion(
+        db,
+        str(row["cliente_id"]),
+        dict(row),
+    )
+    evaluacion = svc_tea.calcular_tea_referencial(
+        contexto_eval["cliente"],
+        dict(row),
+        contexto_eval["consulta_buro"],
+        contexto_eval["preaprobado"],
+        contexto_eval["tarifario"],
+    )
+    if evaluacion["decision"] == "rechazado" and decision != "rechazado":
+        raise ValueError(evaluacion.get("motivo_rechazo") or "La evaluacion crediticia recomienda rechazo")
+
     monto = data.get("monto_aprobado")
     if decision == "rechazado":
         monto = 0
     elif monto is None:
-        monto = float(row["monto_solicitado"] or 0)
+        monto = float(evaluacion["monto_aprobado_sugerido"] or row["monto_solicitado"] or 0)
+    cuota = svc_tea.calcular_cuota_mensual(
+        monto,
+        evaluacion["tea_referencial"],
+        int(row["plazo_meses"] or evaluacion["plazo_sugerido_meses"] or 12),
+    )
+    motivo = data.get("motivo_rechazo")
+    condicion = data.get("condicion_adicional")
+    if decision == "rechazado":
+        motivo = motivo or evaluacion.get("motivo_rechazo") or "No cumple politica de riesgo."
+    if decision == "condicionado":
+        condicion = condicion or evaluacion.get("condicion_adicional") or "Aprobado con condiciones por politica de riesgo."
 
     db.execute(
         text(
             """UPDATE solicitudes_credito
                SET estado = :estado,
                    monto_aprobado = :monto,
+                   cuota_estimada = :cuota,
+                   tea_referencial = :tea,
                    condicion_adicional = :condicion,
                    motivo_rechazo = :motivo,
                    analista_asignado = COALESCE(:analista, analista_asignado),
@@ -513,8 +648,10 @@ def decidir_comite(
             "id": solicitud_id,
             "estado": decision,
             "monto": monto,
-            "condicion": data.get("condicion_adicional"),
-            "motivo": data.get("motivo_rechazo"),
+            "cuota": cuota,
+            "tea": evaluacion["tea_referencial"],
+            "condicion": condicion,
+            "motivo": motivo,
             "analista": analista or data.get("analista_asignado"),
         },
     )
@@ -522,10 +659,22 @@ def decidir_comite(
         "numero_expediente": row["numero_expediente"],
         "decision": decision,
         "monto_aprobado": float(monto or 0),
-        "condicion_adicional": data.get("condicion_adicional"),
-        "motivo_rechazo": data.get("motivo_rechazo"),
+        "cuota_estimada": float(cuota or 0),
+        "tea_referencial": evaluacion["tea_referencial"],
+        "condicion_adicional": condicion,
+        "motivo_rechazo": motivo,
         "analista_asignado": analista or data.get("analista_asignado"),
+        "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
     })
+    svc_tea.registrar_auditoria(
+        db,
+        solicitud_id,
+        row["estado"],
+        decision,
+        "decision_comite",
+        {**evaluacion, "monto_aprobado_sugerido": monto},
+        analista or data.get("analista_asignado"),
+    )
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": decision}
 
@@ -606,6 +755,14 @@ def desembolsar(db: Session, solicitud_id: str, data: dict | None = None) -> dic
         "monto_desembolsado": float(row["monto_aprobado"] or 0),
         "observacion": (data or {}).get("observacion"),
     })
+    svc_tea.registrar_auditoria(
+        db,
+        solicitud_id,
+        row["estado"],
+        "desembolsado",
+        "desembolso",
+        {"monto_aprobado_sugerido": float(row["monto_aprobado"] or 0)},
+    )
     db.commit()
     return {"id": solicitud_id, "numero_expediente": row["numero_expediente"], "estado": "desembolsado"}
 
@@ -614,7 +771,7 @@ def _materializar_desembolso_cliente(db: Session, solicitud) -> None:
     """Refleja un desembolso aprobado en productos, cuenta y movimientos del cliente."""
     cliente_id = str(solicitud["cliente_id"])
     cliente = db.execute(
-        text("SELECT numero_documento FROM clientes WHERE id = :id"),
+        text("SELECT numero_documento, calificacion_sbs FROM clientes WHERE id = :id"),
         {"id": cliente_id},
     ).mappings().first()
     if not cliente:
@@ -627,8 +784,9 @@ def _materializar_desembolso_cliente(db: Session, solicitud) -> None:
 
     plazo = int(solicitud["plazo_meses"] or 12)
     plazo = max(plazo, 1)
-    cuota = float(solicitud["cuota_estimada"] or (monto / plazo))
-    tea = float(solicitud["tea_referencial"] or 43.92)
+    tea = svc_tea.normalizar_tea_decimal(solicitud["tea_referencial"], 0.4392)
+    cuota = svc_tea.calcular_cuota_mensual(monto, tea, plazo)
+    calificacion = svc_tea.normalizar_categoria_sbs(cliente["calificacion_sbs"] or "NORMAL")
     cuenta = f"AHO-{str(cliente['numero_documento'])[-4:]}"
     cod_credito = f"CR-{expediente}"[:30]
     cod_operacion = f"OP-{expediente}"[:40]
@@ -654,7 +812,7 @@ def _materializar_desembolso_cliente(db: Session, solicitud) -> None:
                   calificacion_interna, estado, fecha_desembolso, tea,
                   cuotas_total, cuotas_pagadas)
                VALUES (:id, :cod, :cliente_id, 'Credito Empresarial MYPE',
-                       :monto, :monto, :saldo_total, 0, 'NORMAL', 'vigente',
+                       :monto, :monto, :saldo_total, 0, :calificacion, 'vigente',
                        :fecha, :tea, :plazo, 0)
                ON CONFLICT (cod_cuenta_credito)
                DO UPDATE SET monto_desembolsado=EXCLUDED.monto_desembolsado,
@@ -675,15 +833,18 @@ def _materializar_desembolso_cliente(db: Session, solicitud) -> None:
             "fecha": fecha,
             "tea": tea,
             "plazo": plazo,
+            "calificacion": calificacion,
         },
     )
 
     saldo = monto
+    tem = pow(1 + tea, 1 / 12) - 1
     for nro in range(1, plazo + 1):
-        capital = round(monto / plazo, 2)
-        interes = max(round(cuota - capital, 2), 0)
+        interes = round(saldo * tem, 2)
+        capital = round(cuota - interes, 2)
         if nro == plazo:
             capital = round(saldo, 2)
+        cuota_real = round(capital + interes, 2)
         saldo = max(round(saldo - capital, 2), 0)
         db.execute(
             text(
@@ -706,7 +867,7 @@ def _materializar_desembolso_cliente(db: Session, solicitud) -> None:
                 "cod": cod_credito,
                 "nro": nro,
                 "fecha": fecha + timedelta(days=30 * nro),
-                "cuota": cuota,
+                "cuota": cuota_real,
                 "capital": capital,
                 "interes": interes,
                 "saldo": saldo,
@@ -785,12 +946,19 @@ def _outbox(db: Session, solicitud_id: str, evento: str, payload: dict) -> None:
 
 
 def _row_resumen(r) -> dict:
+    categoria = svc_tea.normalizar_categoria_sbs(r.get("calificacion_sbs") or "NORMAL")
+    perfil = svc_tea.TARIFARIO_DEFAULT[categoria]["riesgo"]
     return {
         "id": str(r["id"]),
         "numero_expediente": r["numero_expediente"],
         "cliente_nombre": f"{r['nombres']} {r['apellidos']}",
         "monto_solicitado": float(r["monto_solicitado"] or 0),
         "monto_aprobado": float(r["monto_aprobado"] or 0),
+        "tea_referencial": svc_tea.normalizar_tea_decimal(r.get("tea_referencial"), 0),
+        "cuota_estimada": float(r.get("cuota_estimada") or 0),
+        "calificacion_sbs": r.get("calificacion_sbs") or "NORMAL",
+        "score_confianza": int(r.get("score_confianza") or 0),
+        "perfil_riesgo": perfil,
         "estado": r["estado"],
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
     }

@@ -807,6 +807,7 @@ class _FieldFileTabState extends State<_FieldFileTab> {
     final result = input.calculate(
       client.scoreValue,
       _number(client.score, 'ingreso_promedio_ref', fallback: 3000),
+      teaReference: client.teaReference,
     );
 
     return _PagePadding(
@@ -1076,7 +1077,10 @@ class _ApplicationTabState extends State<_ApplicationTab> {
     final amount =
         num.tryParse(amountController.text.replaceAll(',', '.')) ??
         client.hypothesisAmount;
-    final factor = ScoringRepository.paymentFactor(0.60, term);
+    final tea = client.teaReference;
+    final factor = tea <= 0
+        ? 0
+        : ScoringRepository.paymentFactor(tea.toDouble(), term);
     final payment = amount * factor;
 
     return _PagePadding(
@@ -1162,7 +1166,12 @@ class _ApplicationTabState extends State<_ApplicationTab> {
           _SectionTitle('Paso 4 Simulador y firma'),
           _MetricStrip(
             metrics: [
-              _MetricItem(Icons.percent, 'TEA ref.', '60%', _AppColors.orange),
+              _MetricItem(
+                Icons.percent,
+                'TEA ref.',
+                _teaLabel(tea),
+                _AppColors.orange,
+              ),
               _MetricItem(
                 Icons.receipt,
                 'Cuota',
@@ -2210,6 +2219,18 @@ class _ClientSummary extends StatelessWidget {
                 _text(client.profile, 'calificacion_sbs', fallback: 'Normal'),
                 _AppColors.teal,
               ),
+              _MetricItem(
+                Icons.shield,
+                'Riesgo',
+                client.riskProfile.toUpperCase(),
+                _AppColors.orange,
+              ),
+              _MetricItem(
+                Icons.percent,
+                'TEA',
+                _teaLabel(client.teaReference),
+                _AppColors.purple,
+              ),
             ],
           ),
         ],
@@ -2275,6 +2296,12 @@ class _ScoreSummary extends StatelessWidget {
                 'Monto max.',
                 _money(result.maxAmount),
                 _AppColors.blue,
+              ),
+              _MetricItem(
+                Icons.percent,
+                'TEA ref.',
+                _teaLabel(result.teaReference),
+                _AppColors.orange,
               ),
               _MetricItem(
                 Icons.receipt_long,
@@ -2963,6 +2990,12 @@ num _number(Map<String, dynamic> map, String key, {num fallback = 0}) {
 
 String _money(num value) {
   return 'S/ ${value.toStringAsFixed(value % 1 == 0 ? 0 : 2)}';
+}
+
+String _teaLabel(num value) {
+  if (value <= 0) return 'Core';
+  final pct = value > 1 ? value : value * 100;
+  return '${pct.toStringAsFixed(2)}%';
 }
 
 String _pretty(String value) {

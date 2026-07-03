@@ -11,6 +11,7 @@ from app.models.mdl_cliente_mobile import (
     CrMovimiento, Tarjeta, OperacionCliente, Notificacion,
 )
 from app.data.casos_credito import casos_completos
+from app.services import svc_tea
 
 
 def get_usuario_by_username(db: Session, username: str) -> UsuarioCliente | None:
@@ -258,7 +259,7 @@ def resumen_demo_fallback(numero_documento: str = "43440349") -> dict:
         "monto_solicitado": 8500.00,
         "monto_aprobado": 8500.00,
         "estado_final": "desembolsado",
-        "tea_referencial": 43.92,
+        "tea_referencial": 0.4392,
         "plazo_meses": 12,
         "cuota_final": 825.40,
     }
@@ -266,7 +267,8 @@ def resumen_demo_fallback(numero_documento: str = "43440349") -> dict:
     cod_credito = f"CR-DEMO-{numero_documento[-4:]}"
     monto_credito = float(caso.get("monto_aprobado") or caso.get("monto_solicitado") or 0)
     plazo = int(caso.get("plazo_meses") or 12)
-    cuota = float(caso.get("cuota_final") or (monto_credito / plazo if plazo else monto_credito))
+    tea = svc_tea.normalizar_tea_decimal(caso.get("tea_referencial"), 0.4392)
+    cuota = svc_tea.calcular_cuota_mensual(monto_credito, tea, plazo)
     return {
         "cliente": cliente,
         "cuentas": [
@@ -294,7 +296,7 @@ def resumen_demo_fallback(numero_documento: str = "43440349") -> dict:
                 "calificacion_interna": "NORMAL",
                 "estado": "vigente",
                 "fecha_desembolso": date.today().isoformat(),
-                "tea": float(caso.get("tea_referencial") or 43.92),
+                "tea": tea,
                 "cuotas_total": plazo,
                 "cuotas_pagadas": 3,
             }
@@ -478,8 +480,8 @@ def asegurar_cliente_demo_login(db: Session, numero_documento: str) -> None:
                SELECT :id, :exp, :asesor, :cliente_id, :agencia,
                       'cliente', 'Bodega', 'Bodega Demo Falabella', 3200.00,
                       2500.00, 2500.00, 12, 'PEN', 'mensual',
-                      'sin_garantia', 'Capital de trabajo', 250.00,
-                      43.92, 'desembolsado', 'firma_demo_cliente', TRUE
+                      'sin_garantia', 'Capital de trabajo', 252.36,
+                      0.4392, 'desembolsado', 'firma_demo_cliente', TRUE
                WHERE NOT EXISTS (
                    SELECT 1 FROM solicitudes_credito
                    WHERE numero_expediente = :exp
@@ -563,7 +565,8 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
         cod_credito = f"CR-{s['numero_expediente']}"[:30]
         monto = float(s["monto_aprobado"] or s["monto_solicitado"] or 0)
         plazo = int(s["plazo_meses"] or 12)
-        cuota = float(s["cuota_estimada"] or (monto / plazo if plazo else monto))
+        tea = svc_tea.normalizar_tea_decimal(s["tea_referencial"], 0.4392)
+        cuota = svc_tea.calcular_cuota_mensual(monto, tea, plazo)
         db.execute(
             text(
                 """INSERT INTO cr_creditos
@@ -583,14 +586,18 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
                 "monto": monto,
                 "saldo_total": round(cuota * plazo, 2),
                 "fecha": datetime.now(timezone.utc).date(),
-                "tea": float(s["tea_referencial"] or 43.92),
+                "tea": tea,
                 "plazo": plazo,
             },
         )
         saldo = monto
         for nro in range(1, plazo + 1):
-            capital = round(monto / plazo, 2)
-            interes = max(round(cuota - capital, 2), 0)
+            tem = pow(1 + tea, 1 / 12) - 1
+            interes = round(saldo * tem, 2)
+            capital = round(cuota - interes, 2)
+            if nro == plazo:
+                capital = round(saldo, 2)
+            cuota_real = round(capital + interes, 2)
             saldo = max(round(saldo - capital, 2), 0)
             db.execute(
                 text(
@@ -606,7 +613,7 @@ def _materializar_productos_demo(db: Session, cliente) -> None:
                     "cod": cod_credito,
                     "nro": nro,
                     "fecha": datetime.now(timezone.utc).date() + timedelta(days=30 * nro),
-                    "cuota": cuota,
+                    "cuota": cuota_real,
                     "capital": capital,
                     "interes": interes,
                     "saldo": saldo,

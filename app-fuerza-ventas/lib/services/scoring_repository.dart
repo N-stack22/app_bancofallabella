@@ -205,6 +205,39 @@ class PreapprovedClient {
     'monto_aprobado',
     fallback: _number(credit, 'monto_maximo', fallback: hypothesisAmount),
   );
+  num get teaReference => ScoringRepository.normaliseTea(
+    _number(
+      credit,
+      'tasa_tea',
+      fallback: _number(
+        credit,
+        'tea_referencial',
+        fallback: _number(credit, 'tea'),
+      ),
+    ),
+  );
+  num get scoreConfidence {
+    final score = _number(
+      credit,
+      'score_confianza',
+      fallback: _number(assignment, 'score_prioridad'),
+    );
+    return score > 100 ? score / 8 : score;
+  }
+
+  String get riskProfile {
+    final sbs = _text(
+      profile,
+      'calificacion_sbs',
+      fallback: 'Normal',
+    ).toUpperCase();
+    if (sbs.contains('PERD')) return 'rechazo';
+    if (sbs.contains('DUD')) return 'muy alto';
+    if (sbs.contains('DEF')) return 'alto';
+    if (sbs.contains('CPP')) return 'moderado';
+    return 'bajo';
+  }
+
   num get lat => _number(profile, 'lat_negocio');
   num get lng => _number(profile, 'lng_negocio');
   bool get isRouteReferenceDestination => userId.startsWith('ruta-');
@@ -315,7 +348,11 @@ class FieldScoringInput {
   final String recomendacion;
   final String observaciones;
 
-  FieldScoringResult calculate(num scoreTransaccional, num ingresoPromedio) {
+  FieldScoringResult calculate(
+    num scoreTransaccional,
+    num ingresoPromedio, {
+    num teaReference = 0,
+  }) {
     if (!negocioVerificado) {
       return FieldScoringResult.disqualified('Negocio no verificado');
     }
@@ -385,7 +422,10 @@ class FieldScoringInput {
       'BASICO' => 3,
       _ => plazoMeses,
     };
-    final factor = ScoringRepository.paymentFactor(0.60, plazoMeses);
+    final tea = ScoringRepository.normaliseTea(teaReference);
+    final factor = tea <= 0
+        ? 0
+        : ScoringRepository.paymentFactor(tea, plazoMeses);
     final incomeCap = ingresoPromedio * 2;
     final paymentCap = factor == 0 ? 0 : (ingresoPromedio * 0.30) / factor;
     final maxAmount = [segmentCap, incomeCap, paymentCap]
@@ -411,6 +451,7 @@ class FieldScoringInput {
       maxAmount: maxAmount,
       suggestedTerm: term,
       payment: proposed * factor,
+      teaReference: tea,
       ptsAntiguedad: ptsAntiguedad,
       ptsTenencia: ptsTenencia,
       ptsVentas: ptsVentas,
@@ -437,6 +478,7 @@ class FieldScoringResult {
     required this.maxAmount,
     required this.suggestedTerm,
     required this.payment,
+    required this.teaReference,
     required this.ptsAntiguedad,
     required this.ptsTenencia,
     required this.ptsVentas,
@@ -460,6 +502,7 @@ class FieldScoringResult {
     maxAmount: 0,
     suggestedTerm: 0,
     payment: 0,
+    teaReference: 0,
     ptsAntiguedad: 0,
     ptsTenencia: 0,
     ptsVentas: 0,
@@ -482,6 +525,7 @@ class FieldScoringResult {
   final double maxAmount;
   final int suggestedTerm;
   final double payment;
+  final double teaReference;
   final int ptsAntiguedad;
   final int ptsTenencia;
   final int ptsVentas;
@@ -1021,7 +1065,6 @@ class ScoringRepository {
     required String purpose,
     required String signature,
   }) async {
-    final factor = paymentFactor(0.60, term);
     if (await readCoreToken() != null) {
       await _postCoreJson('/solicitudes', {
         'numero_documento': _text(
@@ -1047,8 +1090,6 @@ class ScoringRepository {
         'tipo_cuota': 'mensual',
         'garantia': 'sin_garantia',
         'destino_credito': purpose,
-        'cuota_estimada': amount * factor,
-        'tea_referencial': 0.60,
         'firma_cliente_base64': signature,
       });
       return;
@@ -1089,7 +1130,6 @@ class ScoringRepository {
           _number(client.score, 'ingreso_promedio_ref', fallback: 3000) * 0.45,
       'monto_solicitado': amount,
       'plazo_meses': term,
-      'cuota_estimada': amount * factor,
       'destino_credito': purpose,
       'estado': 'enviado',
       'firma_cliente_base64': signature,
@@ -1404,6 +1444,12 @@ class ScoringRepository {
     return tem * pow(1 + tem, months) / (pow(1 + tem, months) - 1);
   }
 
+  static double normaliseTea(num value) {
+    final tea = value.toDouble();
+    if (tea <= 0) return 0;
+    return tea > 1 ? tea / 100 : tea;
+  }
+
   static Map<String, dynamic> _advisorForSession({
     required String? email,
     required List<Map<String, dynamic>> advisors,
@@ -1563,11 +1609,18 @@ class ScoringRepository {
       'segmento': _segmentFromConfidence(confidence),
       'score_transaccional': score,
       'score_final': score,
+      'score_confianza': confidence <= 100 ? confidence : confidence / 8,
       'monto_hipotesis': amount,
       'monto_aprobado': amount,
       'monto_maximo': amount,
       'plazo_meses': _number(preapproval, 'plazo_sugerido_meses', fallback: 6),
-      'tasa_tea': _number(preapproval, 'tea_referencial', fallback: 0.60),
+      'tasa_tea': normaliseTea(
+        _number(
+          preapproval,
+          'tea_referencial',
+          fallback: _number(coreCredit, 'tea'),
+        ),
+      ),
       'estado': _text(
         coreCredit,
         'estado',

@@ -52,7 +52,8 @@ export function formatDateTime(value) {
 /** Formatea un porcentaje: "85.0%". */
 export function formatPct(value) {
   if (value === null || value === undefined || value === '') return '—'
-  const n = toNumber(value)
+  const raw = toNumber(value)
+  const n = Math.abs(raw) <= 1 && raw !== 0 ? raw * 100 : raw
   return `${n.toLocaleString('es-PE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
 }
 

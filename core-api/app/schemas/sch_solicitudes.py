@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 
 
 class SolicitudIn(BaseModel):
@@ -11,6 +11,7 @@ class SolicitudIn(BaseModel):
     tipo_negocio: Optional[str] = None
     nombre_negocio: Optional[str] = None
     ingresos_estimados: Optional[float] = None
+    gastos_mensuales: Optional[float] = None
     # Condiciones
     monto_solicitado: float
     plazo_meses: int
@@ -27,6 +28,10 @@ class SolicitudCreada(BaseModel):
     id: str
     numero_expediente: str
     estado: str
+    tea_referencial: Optional[float] = None
+    cuota_estimada: Optional[float] = None
+    monto_aprobado_sugerido: Optional[float] = None
+    evaluacion_crediticia: Optional[dict[str, Any]] = None
 
 
 class SolicitudResumen(BaseModel):
@@ -35,6 +40,11 @@ class SolicitudResumen(BaseModel):
     cliente_nombre: str
     monto_solicitado: float
     monto_aprobado: float
+    tea_referencial: Optional[float] = None
+    cuota_estimada: Optional[float] = None
+    calificacion_sbs: Optional[str] = None
+    score_confianza: Optional[int] = None
+    perfil_riesgo: Optional[str] = None
     estado: str
     created_at: Optional[str] = None
 

@@ -330,7 +330,7 @@ class BankProducts {
             fallbackProducts.credit.dueDate,
           ),
         ),
-        tea: '${_jsonDouble(credito['tea']).toStringAsFixed(2)}%',
+        tea: _formatTea(credito['tea']),
         installments: cuotas
             .map(
               (item) => Installment(
@@ -426,7 +426,6 @@ class CreditApplicationData {
     required this.monthlyIncome,
     required this.amount,
     required this.termMonths,
-    required this.tea,
     required this.guarantee,
     required this.purpose,
   });
@@ -440,7 +439,6 @@ class CreditApplicationData {
   final double monthlyIncome;
   final double amount;
   final int termMonths;
-  final double tea;
   final String guarantee;
   final String purpose;
 
@@ -455,18 +453,9 @@ class CreditApplicationData {
       monthlyIncome: _jsonDouble(json['ingresos_estimados']),
       amount: _jsonDouble(json['monto_solicitado']),
       termMonths: _jsonInt(json['plazo_meses']),
-      tea: _jsonDouble(json['tea_referencial']),
       guarantee: (json['garantia'] ?? 'sin_garantia').toString(),
       purpose: (json['destino_credito'] ?? '').toString(),
     );
-  }
-
-  double get monthlyPayment {
-    final tem = pow(1 + tea, 1 / 12) - 1;
-    return amount *
-        tem *
-        pow(1 + tem, termMonths) /
-        (pow(1 + tem, termMonths) - 1);
   }
 
   Map<String, dynamic> toJson() => {
@@ -483,8 +472,6 @@ class CreditApplicationData {
     'tipo_cuota': 'mensual',
     'garantia': guarantee,
     'destino_credito': purpose,
-    'cuota_estimada': double.parse(monthlyPayment.toStringAsFixed(2)),
-    'tea_referencial': tea,
   };
 }
 
@@ -493,19 +480,48 @@ class CreditApplicationResult {
     required this.id,
     required this.fileNumber,
     required this.status,
+    required this.teaReference,
+    required this.estimatedPayment,
+    required this.suggestedAmount,
+    required this.riskProfile,
+    required this.scoreConfidence,
+    required this.decision,
   });
 
   factory CreditApplicationResult.fromJson(Map<String, dynamic> json) {
+    final evaluation = _asMap(json['evaluacion_crediticia']);
     return CreditApplicationResult(
       id: (json['id'] ?? '').toString(),
       fileNumber: (json['numero_expediente'] ?? '').toString(),
       status: (json['estado'] ?? 'enviado').toString(),
+      teaReference: _jsonDouble(
+        evaluation['tea_referencial'] ?? json['tea_referencial'],
+      ),
+      estimatedPayment: _jsonDouble(
+        evaluation['cuota_estimada'] ?? json['cuota_estimada'],
+      ),
+      suggestedAmount: _jsonDouble(
+        evaluation['monto_aprobado_sugerido'] ??
+            json['monto_aprobado_sugerido'],
+      ),
+      riskProfile: _text(evaluation['perfil_riesgo'], 'Pendiente'),
+      scoreConfidence: _jsonInt(evaluation['score_confianza']),
+      decision: _text(
+        evaluation['decision'],
+        (json['estado'] ?? 'enviado').toString(),
+      ),
     );
   }
 
   final String id;
   final String fileNumber;
   final String status;
+  final double teaReference;
+  final double estimatedPayment;
+  final double suggestedAmount;
+  final String riskProfile;
+  final int scoreConfidence;
+  final String decision;
 }
 
 class CoreApiClient {
@@ -1491,7 +1507,6 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
   String businessType = 'Bodega';
   String guarantee = 'sin_garantia';
   int termMonths = 12;
-  double tea = 0.4392;
   bool sending = false;
   CreditApplicationResult? result;
 
@@ -1532,8 +1547,6 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
 
   @override
   Widget build(BuildContext context) {
-    final data = _buildData();
-
     return Scaffold(
       appBar: AppBar(title: const Text('Solicitud de credito')),
       body: AppPage(
@@ -1716,26 +1729,9 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
                       },
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<double>(
-                      initialValue: tea,
-                      decoration: const InputDecoration(
-                        labelText: 'TEA',
-                        prefixIcon: Icon(Icons.percent),
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 0.4092,
-                          child: Text('40.92% con seguro'),
-                        ),
-                        DropdownMenuItem(
-                          value: 0.4392,
-                          child: Text('43.92% sin seguro'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) setState(() => tea = value);
-                      },
+                    const InfoRow(
+                      'TEA referencial',
+                      'Calculada por evaluacion crediticia',
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -1778,7 +1774,7 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
                   MetricItem(
                     Icons.receipt_long,
                     'Cuota referencial',
-                    money(data.monthlyPayment),
+                    'Core',
                     AppColors.purple,
                   ),
                   MetricItem(
@@ -1824,6 +1820,21 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
                       const SizedBox(height: 8),
                       InfoRow('Numero', result!.fileNumber),
                       InfoRow('Estado', result!.status.toUpperCase()),
+                      InfoRow(
+                        'Decision sugerida',
+                        result!.decision.toUpperCase(),
+                      ),
+                      InfoRow(
+                        'TEA referencial',
+                        _formatTea(result!.teaReference),
+                      ),
+                      InfoRow(
+                        'Cuota estimada',
+                        money(result!.estimatedPayment),
+                      ),
+                      InfoRow('Monto sugerido', money(result!.suggestedAmount)),
+                      InfoRow('Riesgo', result!.riskProfile),
+                      InfoRow('Score', '${result!.scoreConfidence}/100'),
                       const Text(
                         'Ya debe aparecer en la cartera diaria de Fuerza de Ventas.',
                         style: TextStyle(color: Colors.black54),
@@ -1850,7 +1861,6 @@ class _CreditApplicationPageState extends State<CreditApplicationPage> {
       monthlyIncome: double.tryParse(incomeController.text.trim()) ?? 0,
       amount: double.tryParse(amountController.text.trim()) ?? 0,
       termMonths: termMonths,
-      tea: tea,
       guarantee: guarantee,
       purpose: purposeController.text.trim(),
     );
@@ -3200,6 +3210,12 @@ String money(double value) {
 double _jsonDouble(dynamic value) {
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+String _formatTea(dynamic value) {
+  final raw = _jsonDouble(value);
+  final pct = raw > 1 ? raw : raw * 100;
+  return '${pct.toStringAsFixed(2)}%';
 }
 
 String _movementType(Map<String, dynamic> item) {

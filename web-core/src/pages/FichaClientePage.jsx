@@ -34,7 +34,7 @@ export default function FichaClientePage() {
   if (error) return <Alert tipo="error">{error}</Alert>
   if (!ficha) return null
 
-  const { cliente, posicion, historial = [], oferta, indicadores } = ficha
+  const { cliente, posicion, historial = [], oferta, indicadores, evaluacion_crediticia: evaluacion } = ficha
   const nombre = `${cliente.nombres} ${cliente.apellidos}`.trim()
 
   const irNuevaSolicitud = () => {
@@ -116,6 +116,26 @@ export default function FichaClientePage() {
             <div><dt>Confianza</dt><dd>{oferta.score_confianza}/100</dd></div>
             <div><dt>Vence</dt><dd style={{ fontSize: 14 }}>{formatDate(oferta.fecha_vencimiento)}</dd></div>
           </dl>
+        </Card>
+      )}
+
+      {evaluacion && (
+        <Card title="Evaluacion crediticia y TEA referencial" icon={Activity} style={{ marginTop: 16 }}>
+          <dl className="cm-dl">
+            <div><dt>Categoria SBS</dt><dd><Badge estado={evaluacion.calificacion_sbs} /></dd></div>
+            <div><dt>Score de confianza</dt><dd>{evaluacion.score_confianza}/100</dd></div>
+            <div><dt>Perfil de riesgo</dt><dd>{humanizar(evaluacion.perfil_riesgo)}</dd></div>
+            <div><dt>TEA referencial</dt><dd>{formatPct(evaluacion.tea_referencial)}</dd></div>
+            <div><dt>Cuota estimada</dt><dd><Money value={evaluacion.cuota_estimada} /></dd></div>
+            <div><dt>Monto sugerido</dt><dd><Money value={evaluacion.monto_aprobado_sugerido} /></dd></div>
+            <div><dt>Plazo sugerido</dt><dd>{evaluacion.plazo_sugerido_meses} meses</dd></div>
+            <div><dt>Decision sugerida</dt><dd><Badge estado={evaluacion.decision} /></dd></div>
+          </dl>
+          {evaluacion.motivos?.length > 0 && (
+            <ul style={{ margin: '10px 0 0', color: 'var(--hb-muted)' }}>
+              {evaluacion.motivos.map((m, i) => <li key={i}>{m}</li>)}
+            </ul>
+          )}
         </Card>
       )}
 

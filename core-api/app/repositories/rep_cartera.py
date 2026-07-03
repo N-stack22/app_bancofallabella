@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, text
 from app.models.mdl_cartera import CarteraDiaria
 from app.models.mdl_clientes import Cliente
+from app.services import svc_tea
 
 
 def primer_asesor_activo(db: Session) -> str | None:
@@ -99,9 +100,10 @@ def enviar_comite(db: Session, asesor_id: str, cartera_id: str, data: dict) -> b
 
     solicitud = db.execute(
         text(
-            """SELECT id
-               FROM solicitudes_credito
-               WHERE cliente_id = :cliente_id
+            """SELECT s.*, c.numero_documento
+               FROM solicitudes_credito s
+               JOIN clientes c ON c.id = s.cliente_id
+               WHERE s.cliente_id = :cliente_id
                ORDER BY created_at DESC
                LIMIT 1"""
         ),
@@ -110,22 +112,45 @@ def enviar_comite(db: Session, asesor_id: str, cartera_id: str, data: dict) -> b
     if not solicitud:
         return False
 
+    solicitud_eval = dict(solicitud)
+    if data.get("monto_propuesto"):
+        solicitud_eval["monto_solicitado"] = data.get("monto_propuesto")
+    if data.get("plazo_meses"):
+        solicitud_eval["plazo_meses"] = data.get("plazo_meses")
+    evaluacion = svc_tea.calcular_tea_referencial_db(
+        db,
+        str(fila.cliente_id),
+        solicitud_eval,
+    )
+    estado = (
+        evaluacion["decision"]
+        if evaluacion["decision"] in {"rechazado", "condicionado"}
+        else "recibido_comite"
+    )
+
     db.execute(
         text(
             """UPDATE solicitudes_credito
-               SET estado = 'recibido_comite',
+               SET estado = :estado,
                    monto_aprobado = :monto,
                    plazo_meses = :plazo,
                    cuota_estimada = :cuota,
+                   tea_referencial = :tea,
+                   motivo_rechazo = :motivo,
+                   condicion_adicional = :condicion,
                    pendiente_sync = TRUE,
                    updated_at = now()
                WHERE id = :solicitud_id"""
         ),
         {
             "solicitud_id": str(solicitud["id"]),
-            "monto": data.get("monto_propuesto") or 0,
-            "plazo": data.get("plazo_meses") or 0,
-            "cuota": data.get("cuota_estimada") or 0,
+            "estado": estado,
+            "monto": evaluacion["monto_aprobado_sugerido"],
+            "plazo": evaluacion["plazo_sugerido_meses"],
+            "cuota": evaluacion["cuota_estimada"],
+            "tea": evaluacion["tea_referencial"],
+            "motivo": evaluacion.get("motivo_rechazo"),
+            "condicion": evaluacion.get("condicion_adicional"),
         },
     )
     fila.estado_visita = "visitado"
@@ -141,8 +166,22 @@ def enviar_comite(db: Session, asesor_id: str, cartera_id: str, data: dict) -> b
         {
             "id": str(uuid.uuid4()),
             "eid": str(solicitud["id"]),
-            "payload": json.dumps(data),
+            "payload": json.dumps(
+                {
+                    **data,
+                    "estado": estado,
+                    "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
+                }
+            ),
         },
+    )
+    svc_tea.registrar_auditoria(
+        db,
+        str(solicitud["id"]),
+        solicitud["estado"],
+        estado,
+        "envio_cartera_comite",
+        evaluacion,
     )
     db.commit()
     return True

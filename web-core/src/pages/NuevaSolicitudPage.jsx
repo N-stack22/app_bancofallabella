@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, PlusCircle, CheckCircle2, UserPlus, Coins } from 'lucide-react'
 import PageHead from '../components/layout/PageHead.jsx'
@@ -6,7 +6,7 @@ import Card from '../components/ui/Card.jsx'
 import Alert from '../components/ui/Alert.jsx'
 import Money from '../components/ui/Money.jsx'
 import { crearSolicitud } from '../services/solicitudesService.js'
-import { extractError, toNumber } from '../utils/format.js'
+import { extractError, formatPct, toNumber } from '../utils/format.js'
 
 const MONEDAS = [{ v: 'PEN', l: 'Soles (S/)' }, { v: 'USD', l: 'Dólares (US$)' }]
 const TIPO_CUOTA = [{ v: 'mensual', l: 'Mensual' }, { v: 'quincenal', l: 'Quincenal' }, { v: 'semanal', l: 'Semanal' }]
@@ -30,30 +30,19 @@ export default function NuevaSolicitudPage() {
     tipo_negocio: pre.tipo_negocio || '',
     nombre_negocio: pre.nombre_negocio || '',
     ingresos_estimados: '',
+    gastos_mensuales: '',
     monto_solicitado: '',
     plazo_meses: '12',
     moneda: 'PEN',
     tipo_cuota: 'mensual',
     garantia: 'sin_garantia',
     destino_credito: '',
-    tea_referencial: '36',
   })
   const [error, setError] = useState(null)
   const [done, setDone] = useState(null)
   const [saving, setSaving] = useState(false)
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
-  const simbolo = f.moneda === 'USD' ? 'US$' : 'S/'
-
-  // Cuota estimada (método francés) — referencial para el asesor.
-  const cuotaEstimada = useMemo(() => {
-    const monto = toNumber(f.monto_solicitado)
-    const n = parseInt(f.plazo_meses, 10) || 0
-    const tea = toNumber(f.tea_referencial) / 100
-    if (monto <= 0 || n <= 0 || tea <= 0) return 0
-    const i = Math.pow(1 + tea, 1 / 12) - 1 // tasa efectiva mensual
-    return (monto * i) / (1 - Math.pow(1 + i, -n))
-  }, [f.monto_solicitado, f.plazo_meses, f.tea_referencial])
 
   const onSubmit = async (e) => {
     e.preventDefault()
@@ -76,14 +65,13 @@ export default function NuevaSolicitudPage() {
         tipo_negocio: f.tipo_negocio.trim() || null,
         nombre_negocio: f.nombre_negocio.trim() || null,
         ingresos_estimados: f.ingresos_estimados ? toNumber(f.ingresos_estimados) : null,
+        gastos_mensuales: f.gastos_mensuales ? toNumber(f.gastos_mensuales) : null,
         monto_solicitado: toNumber(f.monto_solicitado),
         plazo_meses: parseInt(f.plazo_meses, 10),
         moneda: f.moneda,
         tipo_cuota: f.tipo_cuota,
         garantia: f.garantia,
         destino_credito: f.destino_credito.trim() || null,
-        cuota_estimada: cuotaEstimada ? Number(cuotaEstimada.toFixed(2)) : null,
-        tea_referencial: toNumber(f.tea_referencial),
       }
       const res = await crearSolicitud(payload)
       setDone(res)
@@ -108,6 +96,21 @@ export default function NuevaSolicitudPage() {
               </p>
             </div>
           </div>
+          {done.evaluacion_crediticia && (
+            <div style={{ marginTop: 18 }}>
+              <h4 style={{ margin: '0 0 10px' }}>Evaluacion crediticia y TEA referencial</h4>
+              <dl className="cm-dl">
+                <div><dt>SBS</dt><dd>{done.evaluacion_crediticia.calificacion_sbs}</dd></div>
+                <div><dt>Score</dt><dd>{done.evaluacion_crediticia.score_confianza}/100</dd></div>
+                <div><dt>Riesgo</dt><dd>{done.evaluacion_crediticia.perfil_riesgo}</dd></div>
+                <div><dt>TEA</dt><dd>{formatPct(done.evaluacion_crediticia.tea_referencial)}</dd></div>
+                <div><dt>Monto sugerido</dt><dd><Money value={done.evaluacion_crediticia.monto_aprobado_sugerido} /></dd></div>
+                <div><dt>Plazo sugerido</dt><dd>{done.evaluacion_crediticia.plazo_sugerido_meses} meses</dd></div>
+                <div><dt>Cuota estimada</dt><dd><Money value={done.evaluacion_crediticia.cuota_estimada} /></dd></div>
+                <div><dt>Decision</dt><dd>{done.evaluacion_crediticia.decision}</dd></div>
+              </dl>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
             <button className="hb-btn" onClick={() => navigate('/solicitudes')}>Ver mis solicitudes</button>
             <button className="hb-btn hb-btn-gray" onClick={() => { setDone(null); }}>Registrar otra</button>
@@ -156,6 +159,10 @@ export default function NuevaSolicitudPage() {
               <label>Ingresos estimados (mensual)</label>
               <input className="hb-input" inputMode="decimal" placeholder="0.00" value={f.ingresos_estimados} onChange={set('ingresos_estimados')} />
             </div>
+            <div className="hb-field">
+              <label>Gastos mensuales</label>
+              <input className="hb-input" inputMode="decimal" placeholder="0.00" value={f.gastos_mensuales} onChange={set('gastos_mensuales')} />
+            </div>
           </div>
         </Card>
 
@@ -168,10 +175,6 @@ export default function NuevaSolicitudPage() {
             <div className="hb-field">
               <label>Plazo (meses) *</label>
               <input className="hb-input" inputMode="numeric" value={f.plazo_meses} onChange={set('plazo_meses')} required />
-            </div>
-            <div className="hb-field">
-              <label>TEA referencial (%)</label>
-              <input className="hb-input" inputMode="decimal" value={f.tea_referencial} onChange={set('tea_referencial')} />
             </div>
             <div className="hb-field">
               <label>Moneda</label>
@@ -197,15 +200,10 @@ export default function NuevaSolicitudPage() {
             <input className="hb-input" placeholder="Ej. capital de trabajo, compra de mercadería…" value={f.destino_credito} onChange={set('destino_credito')} />
           </div>
 
-          {cuotaEstimada > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#e6f7f6', border: '1px solid #b8e6e4', borderRadius: 10, padding: '12px 16px' }}>
-              <Coins size={20} color="#0c6b68" />
-              <span style={{ color: '#0c6b68', fontWeight: 600 }}>Cuota mensual estimada:</span>
-              <span style={{ marginLeft: 'auto', fontSize: 18, fontWeight: 800, color: '#00a9a5' }}>
-                <Money value={cuotaEstimada} simbolo={simbolo} />
-              </span>
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#eef7ff', border: '1px solid #c9dff7', borderRadius: 10, padding: '12px 16px' }}>
+            <Coins size={20} color="#155e75" />
+            <span style={{ color: '#155e75', fontWeight: 700 }}>TEA y cuota se calculan en Core segun evaluacion crediticia.</span>
+          </div>
         </Card>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>

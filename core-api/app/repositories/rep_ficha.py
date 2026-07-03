@@ -1,6 +1,7 @@
 from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.services import svc_tea
 
 
 def listar_clientes(db: Session, q: str | None = None, limit: int = 200) -> list[dict]:
@@ -156,6 +157,18 @@ def obtener_ficha(db: Session, cliente_id: str) -> dict | None:
         ),
         {"id": cliente_id, "hoy": date.today()},
     ).mappings().first()
+    solicitud = db.execute(
+        text(
+            """
+            SELECT *
+            FROM solicitudes_credito
+            WHERE cliente_id = :id
+            ORDER BY created_at DESC NULLS LAST
+            LIMIT 1
+            """
+        ),
+        {"id": cliente_id},
+    ).mappings().first()
 
     # Comportamiento de pagos ultimos 12 meses (RF-31): 1=puntual, 2=mora, 0=sin cuota
     dni = cli["numero_documento"] or "0"
@@ -176,6 +189,20 @@ def obtener_ficha(db: Session, cliente_id: str) -> dict | None:
         float(h["monto_desembolsado"] or 0)
         for h in historial
         if h["estado"] == "pagado"
+    )
+    solicitud_eval = dict(solicitud) if solicitud else {
+        "numero_documento": cli["numero_documento"],
+        "ingresos_estimados": cli["ingresos_estimados"],
+        "monto_solicitado": oferta["monto_maximo"] if oferta else 0,
+        "plazo_meses": oferta["plazo_sugerido_meses"] if oferta else 12,
+    }
+    contexto_eval = svc_tea.cargar_contexto_evaluacion(db, cliente_id, solicitud_eval)
+    evaluacion = svc_tea.calcular_tea_referencial(
+        contexto_eval["cliente"],
+        solicitud_eval,
+        contexto_eval["consulta_buro"],
+        contexto_eval["preaprobado"],
+        contexto_eval["tarifario"],
     )
 
     return {
@@ -221,10 +248,11 @@ def obtener_ficha(db: Session, cliente_id: str) -> dict | None:
         else {
             "monto_maximo": float(oferta["monto_maximo"]),
             "plazo_sugerido_meses": oferta["plazo_sugerido_meses"],
-            "tea_referencial": float(oferta["tea_referencial"] or 0),
+            "tea_referencial": svc_tea.normalizar_tea_decimal(oferta["tea_referencial"], 0),
             "score_confianza": oferta["score_confianza"] or 0,
             "fecha_vencimiento": oferta["fecha_vencimiento"].isoformat()
             if oferta["fecha_vencimiento"]
             else None,
         },
+        "evaluacion_crediticia": svc_tea.evaluacion_publica(evaluacion),
     }

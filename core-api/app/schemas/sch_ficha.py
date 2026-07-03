@@ -72,10 +72,23 @@ class IndicadoresComportamiento(BaseModel):
     monto_pagado: float
 
 
+class EvaluacionCrediticiaOut(BaseModel):
+    calificacion_sbs: Optional[str] = None
+    score_confianza: Optional[int] = None
+    perfil_riesgo: Optional[str] = None
+    tea_referencial: Optional[float] = None
+    monto_aprobado_sugerido: Optional[float] = None
+    plazo_sugerido_meses: Optional[int] = None
+    cuota_estimada: Optional[float] = None
+    decision: Optional[str] = None
+    motivos: list[str] = []
+
+
 class FichaOut(BaseModel):
     cliente: ClienteFicha
     posicion: PosicionCliente
     historial: list[CreditoHistorial]
     oferta: Optional[OfertaPreaprobada] = None
+    evaluacion_crediticia: Optional[EvaluacionCrediticiaOut] = None
     comportamiento: list[int] = []
     indicadores: Optional[IndicadoresComportamiento] = None

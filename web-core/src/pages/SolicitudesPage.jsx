@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import {
   agregarNota, decidirComite, desembolsarSolicitud, listarNotas, listarSolicitudes,
 } from '../services/solicitudesService.js'
-import { extractError, formatDate, formatDateTime } from '../utils/format.js'
+import { extractError, formatDate, formatDateTime, formatPct } from '../utils/format.js'
 import { hasRole } from '../utils/roles.js'
 
 export default function SolicitudesPage() {
@@ -165,6 +165,9 @@ export default function SolicitudesPage() {
                   <th>Cliente</th>
                   <th className="num">Solicitado</th>
                   <th className="num">Aprobado</th>
+                  <th>Riesgo</th>
+                  <th className="num">TEA</th>
+                  <th className="num">Cuota</th>
                   <th>Estado</th>
                   <th>Fecha</th>
                   <th></th>
@@ -177,6 +180,11 @@ export default function SolicitudesPage() {
                     <td>{s.cliente_nombre}</td>
                     <td className="num"><Money value={s.monto_solicitado} /></td>
                     <td className="num">{s.monto_aprobado ? <Money value={s.monto_aprobado} /> : '-'}</td>
+                    <td>
+                      <Badge estado={s.calificacion_sbs || s.perfil_riesgo || 'NORMAL'} label={`${s.calificacion_sbs || 'NORMAL'} · ${s.score_confianza || 0}/100`} />
+                    </td>
+                    <td className="num">{s.tea_referencial != null ? formatPct(s.tea_referencial) : '-'}</td>
+                    <td className="num">{s.cuota_estimada ? <Money value={s.cuota_estimada} /> : '-'}</td>
                     <td><Badge estado={s.estado} /></td>
                     <td>{formatDate(s.created_at)}</td>
                     <td>
